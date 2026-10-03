@@ -64,6 +64,11 @@ img{max-width:100%}
 .login-card p{margin:0 0 6px;color:var(--muted)}
 .login-card .form{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px}
 
+/* iPhone geeft datum- en tijdvelden een eigen minimale breedte; zo passen ze naast elkaar */
+.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.fld input[type="date"],.fld input[type="time"]{-webkit-appearance:none;appearance:none;display:block;min-height:46px;text-align:left}
+.fld input::-webkit-date-and-time-value{text-align:left}
+
 /* agenda */
 .agenda-btn{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--accent);padding:11px 12px}
 .agenda-btn svg{width:18px;height:18px}
@@ -286,7 +291,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "3 okt 2026 · 2";
+const VERSIE = "3 okt 2026 · 3";
 
 (function(){
 "use strict";
@@ -777,7 +782,7 @@ function renderSheet(){
     inner = `<h2>${s.id ? "Wijzigen" : "Nieuw item"}</h2>
     <form class="form" id="taskForm" autocomplete="off">
       <div class="fld"><label for="f-titel">Wat</label><input id="f-titel" required maxlength="140" value="${esc(t.titel||"")}" placeholder="Bijv. dozen inpakken keuken"></div>
-      ${s.id && t.datum ? `<button type="button" class="btn agenda-btn" data-act="agenda">${ICON_CAL} Zet in agenda met herinnering</button>` : ""}
+      <button type="button" class="btn agenda-btn" data-act="agenda">${ICON_CAL} Zet in agenda met herinnering</button>
       <div class="fld"><span class="lab">Soort</span><div class="pick" role="group">${SOORTEN.map(([v,l]) => `<button type="button" data-pick="soort" data-v="${v}" aria-pressed="${t.soort===v}">${l}</button>`).join("")}</div></div>
       <div class="fld"><span class="lab">Wie doet het</span><div class="pick" role="group">${wieOpts.map(([v,l,k]) => `<button type="button" data-pick="wie" data-v="${esc(v)}" aria-pressed="${(t.wie||"")===v}">${k ? `<span class="dot" style="background:${esc(k)}"></span>` : ""}${esc(l)}</button>`).join("")}</div></div>
       <div class="two">
@@ -825,7 +830,7 @@ function renderSheet(){
       </div>
     </form>`;
   } else if (s.type === "agenda"){
-    const t = S.tasks.find(x => x.id === s.id);
+    const t = s.data.taak || S.tasks.find(x => x.id === s.id);
     if (!t){ closeSheet(); return; }
     const opties = ALARMEN.filter(([v]) => v !== "uur" || t.tijd);
     inner = `<h2>Zet in agenda</h2>
@@ -945,7 +950,9 @@ async function write(fn, okMsg){
   try { await fn(S.db); if (okMsg) toast(okMsg); return true; }
   catch(e){ toast(failMsg(e)); return false; }
 }
-async function saveTask(){
+// een eigen id, zodat een nieuwe taak meteen in de agenda kan
+const maakId = () => Array.from(crypto.getRandomValues(new Uint8Array(15)), b => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+async function saveTask(metAgenda){
   captureForm();
   const s = S.sheet, d = s.data;
   const titel = (d.titel||"").trim();
@@ -963,9 +970,12 @@ async function saveTask(){
     herhaal, wisselen: !!herhaal && !!d.wisselen,
     laatstKlaar: herhaal ? (d.laatstKlaar || null) : null, laatstDoor: herhaal ? (d.laatstDoor || null) : null, vorige: herhaal ? (d.vorige || null) : null,
   };
-  const id = s.id;
+  if (metAgenda && !body.datum){ toast("Kies eerst een datum, dan kan hij in je agenda."); $("#f-datum").focus(); return; }
+  const id = s.id || maakId();
   closeSheet();
-  await write(db => id ? db.doc("tasks/"+id).set(body) : db.collection("tasks").add(body), id ? "Bijgewerkt" : "Toegevoegd");
+  // eerst het agendavenster openen; daar tik je zelf op "Naar agenda" (de iPhone wil dat het een tik is)
+  if (metAgenda) openSheet({type:"agenda", id, data:{alarm: body.tijd ? "uur" : "avond", taak: Object.assign({id}, body)}});
+  await write(db => db.doc("tasks/"+id).set(body), metAgenda ? "" : s.id ? "Bijgewerkt" : "Toegevoegd");
 }
 async function savePerson(){
   captureForm();
@@ -1061,13 +1071,9 @@ document.addEventListener("click", e => {
       break;
     }
     case "who-am-i": openSheet({type:"ik"}); break;
-    case "agenda": {
-      const t = S.tasks.find(x => x.id === S.sheet.id); if (!t) return;
-      openSheet({type:"agenda", id: t.id, data:{alarm: t.tijd ? "uur" : "avond"}});
-      break;
-    }
+    case "agenda": saveTask(true); break;
     case "agenda-go": {
-      const t = S.tasks.find(x => x.id === S.sheet.id); if (!t) return;
+      const t = S.sheet.data.taak || S.tasks.find(x => x.id === S.sheet.id); if (!t) return;
       bewaarIcs(t, S.sheet.data.alarm);
       closeSheet();
       break;
