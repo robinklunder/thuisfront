@@ -291,7 +291,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "3 okt 2026 · 3";
+const VERSIE = "3 okt 2026 · 4";
 
 (function(){
 "use strict";
@@ -360,6 +360,7 @@ function volgendeKeer(t){
 }
 
 /* ---------- agenda (.ics) ---------- */
+const APP_URL = "https://robinklunder.github.io/thuisfront/";
 const ALARMEN = [["avond","Avond ervoor, 20:00"],["ochtend","Op de dag, 7:30"],["uur","1 uur van tevoren"],["geen","Geen herinnering"]];
 const icsTekst = s => String(s || "").replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n");
 // regels in een agendabestand mogen niet te lang zijn; langere regels gaan verder op een regel die met een spatie begint
@@ -382,14 +383,16 @@ function maakIcs(t, alarm){
   if (t.herhaal) r.push("RRULE:FREQ=" + {dag:"DAILY", week:"WEEKLY", maand:"MONTHLY"}[t.herhaal.eenheid] + ";INTERVAL=" + t.herhaal.n);
   const p = personById(t.wie);
   const wie = t.wisselen ? "" : t.wie === "samen" ? "samen" : p ? p.naam : "";
-  r.push(icsVouw("SUMMARY:" + icsTekst(t.titel + (wie ? " (" + wie + ")" : ""))));
-  const uitleg = [t.notitie, t.wisselen ? "Gaat om en om. Kijk in Het Thuisfront wie er aan de beurt is." : "", "Uit Het Thuisfront"].filter(Boolean).join("\n");
+  const titel = t.titel + (wie ? " (" + wie + ")" : "");
+  r.push(icsVouw("SUMMARY:" + icsTekst(titel)));
+  const uitleg = ["Toegevoegd vanuit Het Thuisfront", t.notitie, t.wisselen ? "Gaat om en om. Kijk in de app wie er aan de beurt is." : ""].filter(Boolean).join("\n");
   r.push(icsVouw("DESCRIPTION:" + icsTekst(uitleg)));
+  r.push("URL:" + APP_URL, "CATEGORIES:Thuisfront");
   if (alarm && alarm !== "geen"){
     const trig = alarm === "avond" ? icsDuur(-(start + 4 * 60))      // 20:00 de avond ervoor
                : alarm === "ochtend" ? icsDuur(7 * 60 + 30 - start)  // 7:30 op de dag zelf
                : icsDuur(-60);
-    r.push("BEGIN:VALARM","ACTION:DISPLAY",icsVouw("DESCRIPTION:" + icsTekst(t.titel)),"TRIGGER:" + trig,"END:VALARM");
+    r.push("BEGIN:VALARM","ACTION:DISPLAY",icsVouw("DESCRIPTION:" + icsTekst(titel)),"TRIGGER:" + trig,"END:VALARM");
   }
   r.push("END:VEVENT","END:VCALENDAR");
   return r.join("\r\n") + "\r\n";
@@ -837,7 +840,7 @@ function renderSheet(){
     <div class="form">
       <div class="agenda-info"><b>${esc(t.titel)}</b><span>${esc(cap(fmtLang(t.datum)))}${t.tijd ? " om " + esc(t.tijd) : ", hele dag"}${t.herhaal ? " · " + esc(herhaalLabel(t.herhaal).toLowerCase()) : ""}</span></div>
       <div class="fld"><span class="lab">Herinnering</span><div class="pick" role="group">${opties.map(([v,l]) => `<button type="button" data-pick="alarm" data-v="${v}" aria-pressed="${s.data.alarm===v}">${l}</button>`).join("")}</div></div>
-      <p class="hint">Je iPhone laat de afspraak zien. Tik daar op <b>Voeg toe</b>. Pas je de taak later aan, verwijder dan de oude afspraak uit je agenda en zet hem opnieuw.</p>
+      <p class="hint">Je iPhone laat de afspraak zien. Tik daar op <b>Voeg toe</b>. Hij komt in je standaardagenda. Pas je de taak later aan, verwijder dan de oude afspraak uit je agenda en zet hem opnieuw.</p>
       <div class="actions"><div class="right"><button type="button" class="btn" data-act="close">Annuleer</button><button type="button" class="btn primary" data-act="agenda-go">Naar agenda</button></div></div>
     </div>`;
   } else if (s.type === "instellingen"){
