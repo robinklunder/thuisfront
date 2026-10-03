@@ -286,7 +286,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "2 okt 2026 · 1";
+const VERSIE = "3 okt 2026 · 2";
 
 (function(){
 "use strict";
@@ -777,6 +777,7 @@ function renderSheet(){
     inner = `<h2>${s.id ? "Wijzigen" : "Nieuw item"}</h2>
     <form class="form" id="taskForm" autocomplete="off">
       <div class="fld"><label for="f-titel">Wat</label><input id="f-titel" required maxlength="140" value="${esc(t.titel||"")}" placeholder="Bijv. dozen inpakken keuken"></div>
+      ${s.id && t.datum ? `<button type="button" class="btn agenda-btn" data-act="agenda">${ICON_CAL} Zet in agenda met herinnering</button>` : ""}
       <div class="fld"><span class="lab">Soort</span><div class="pick" role="group">${SOORTEN.map(([v,l]) => `<button type="button" data-pick="soort" data-v="${v}" aria-pressed="${t.soort===v}">${l}</button>`).join("")}</div></div>
       <div class="fld"><span class="lab">Wie doet het</span><div class="pick" role="group">${wieOpts.map(([v,l,k]) => `<button type="button" data-pick="wie" data-v="${esc(v)}" aria-pressed="${(t.wie||"")===v}">${k ? `<span class="dot" style="background:${esc(k)}"></span>` : ""}${esc(l)}</button>`).join("")}</div></div>
       <div class="two">
@@ -791,7 +792,6 @@ function renderSheet(){
       </div>
       <div class="fld"><label for="f-notitie">Notitie</label><textarea id="f-notitie" maxlength="1000" placeholder="Winkel, link, telefoonnummer…">${esc(t.notitie||"")}</textarea></div>
       <label class="toggle"><input type="checkbox" id="f-belangrijk" ${t.belangrijk ? "checked" : ""}> Belangrijk</label>
-      ${s.id && t.datum ? `<button type="button" class="btn agenda-btn" data-act="agenda">${ICON_CAL} Zet in agenda met herinnering</button>` : ""}
       <div class="actions">
         ${s.id ? `<button type="button" class="btn danger${s.armed ? " armed" : ""}" data-act="delete-task">${s.armed ? "Echt verwijderen" : "Verwijderen"}</button>` : ""}
         <div class="right"><button type="button" class="btn" data-act="close">Annuleer</button><button type="submit" class="btn primary">Bewaar</button></div>
