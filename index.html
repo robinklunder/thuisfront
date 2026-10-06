@@ -128,6 +128,13 @@ button{cursor:pointer}
 /* navigatie dag/week */
 .nav{display:flex;align-items:center;gap:8px;margin-block:14px 6px}
 .nav h2{flex:1;margin:0;font-family:var(--f-display);font-weight:700;font-size:19px;text-wrap:balance}
+/* tik op de datum of het weeknummer: er ligt een onzichtbaar datumveld overheen dat de kalender van de telefoon opent */
+.kies-datum{position:relative;flex:1;min-width:0;border-radius:10px}
+.kies-datum h2{display:block}
+.kies-datum .kies-pijl{width:16px;height:16px;margin-left:6px;vertical-align:-1px;color:var(--accent)}
+.kies-datum input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;padding:0;border:0;-webkit-appearance:none;appearance:none;cursor:pointer;font-size:16px}
+.kies-datum:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.toon-klaar{display:block;margin:10px auto 0}
 .icon-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;flex:0 0 auto}
 .icon-btn svg{width:18px;height:18px}
 .link-btn{border:0;background:transparent;color:var(--accent);font-weight:600;font-size:13.5px;padding:6px 4px}
@@ -238,7 +245,8 @@ button{cursor:pointer}
 .actions{display:flex;gap:8px;justify-content:space-between;margin-top:4px;flex-wrap:wrap}
 .actions .right{display:flex;gap:8px;margin-left:auto}
 
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(144px + env(safe-area-inset-bottom,0px));z-index:60;background:var(--fg);color:var(--bg);border-radius:10px;padding:9px 14px;font-size:13.5px;font-weight:600;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(144px + env(safe-area-inset-bottom,0px));z-index:60;background:var(--fg);color:var(--bg);border-radius:10px;padding:9px 14px;font-size:13.5px;font-weight:600;box-shadow:var(--shadow);max-width:calc(100% - 32px);display:flex;align-items:center;gap:14px}
+.toast button{border:0;background:transparent;color:inherit;font-weight:800;text-decoration:underline;padding:4px 0;white-space:nowrap;flex:0 0 auto}
 
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
@@ -291,7 +299,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "3 okt 2026 · 4";
+const VERSIE = "6 okt 2026 · 5";
 
 (function(){
 "use strict";
@@ -407,6 +415,7 @@ function bewaarIcs(t, alarm){
 }
 
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+const ICON_KIES = '<svg class="kies-pijl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 const ICON_CAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M12 13v4M10 15h4"/></svg>';
 const ICON_REP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5M20 4v4.5h-4.5M20 12a8 8 0 0 1-13.7 5.6L4 15.5M4 20v-4.5h4.5"/></svg>';
 const ICON_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5-7 7 7 7"/></svg>';
@@ -418,6 +427,7 @@ const S = {
   people: [], tasks: [],
   view: lsGet("view") || "dag",
   dag: vandaag(),
+  toonKlaar: false, toastActie: null,
   week: iso(monday(new Date())),
   filter: lsGet("filter") || "alle",
   takenStatus: "open",
@@ -543,24 +553,34 @@ function tick(){
 setInterval(tick, 1000);
 
 /* ---------- weergaven ---------- */
+// afgevinkte taken zijn standaard verborgen in Dag en Week; deze knop haalt ze terug
+function toonKlaarKnop(n){
+  return `<button class="link-btn toon-klaar" type="button" data-act="toon-klaar">${S.toonKlaar ? "Verberg afgevinkte" : `Toon afgevinkte (${n})`}</button>`;
+}
 function viewDag(){
   const today = vandaag();
   const isToday = S.dag === today;
   const all = S.tasks.filter(matchFilter);
-  const opDag = itemsOpDag(all, S.dag).sort(sortByTime);
+  const alles = itemsOpDag(all, S.dag).sort(sortByTime);
+  const nKlaar = alles.filter(t => t.klaar).length;
+  const opDag = S.toonKlaar ? alles : alles.filter(t => !t.klaar);
   const late = isToday ? all.filter(t => !t.klaar && t.datum && t.datum < today).sort(sortTasks) : [];
   const zonder = all.filter(t => !t.klaar && !t.datum && !t.herhaal).length;
   const label = isToday ? "Vandaag" : S.dag === iso(addDays(new Date(),1)) ? "Morgen" : S.dag === iso(addDays(new Date(),-1)) ? "Gisteren" : "";
   let h = heroHtml() + statusNote() + filterChips();
   h += `<div class="nav">
     <button class="icon-btn" type="button" data-act="day" data-n="-1" aria-label="Vorige dag">${ICON_L}</button>
-    <h2>${label ? esc(label) + " · " + esc(fmtLang(S.dag)) : esc(cap(fmtLang(S.dag)))}</h2>
+    <div class="kies-datum">
+      <h2>${label ? esc(label) + " · " + esc(fmtLang(S.dag)) : esc(cap(fmtLang(S.dag)))}${ICON_KIES}</h2>
+      <input id="dagKiezer" type="date" value="${S.dag}" aria-label="Kies een dag">
+    </div>
     ${isToday ? "" : `<button class="link-btn" type="button" data-act="day" data-n="0">Vandaag</button>`}
     <button class="icon-btn" type="button" data-act="day" data-n="1" aria-label="Volgende dag">${ICON_R}</button>
   </div>`;
   if (late.length) h += secHtml("Te laat", late.length, listHtml(late, "", "", {compact:true}), "late");
   h += secHtml(isToday ? "Op de planning" : "Gepland", opDag.length,
-    listHtml(opDag, "Niets gepland op deze dag", "Tik op + om iets in te plannen.", {hideDate:true}, {datum:S.dag}));
+    listHtml(opDag, nKlaar ? "Alles afgevinkt" : "Niets gepland op deze dag", nKlaar ? "Goed bezig." : "Tik op + om iets in te plannen.", {hideDate:true}, {datum:S.dag}));
+  if (nKlaar) h += toonKlaarKnop(nKlaar);
   if (zonder) h += `<div class="note">${zonder} ${zonder===1?"open item heeft":"open items hebben"} nog geen datum. <button class="link-btn" type="button" data-act="tab" data-id="taken">Bekijk in Taken</button></div>`;
   return h;
 }
@@ -574,24 +594,31 @@ function viewWeek(){
   let h = statusNote() + filterChips();
   h += `<div class="nav">
     <button class="icon-btn" type="button" data-act="week" data-n="-1" aria-label="Vorige week">${ICON_L}</button>
-    <h2>Week ${weekNr(start)} <span style="font-weight:500;color:var(--muted);font-size:15px;text-transform:none">${esc(fmtR(start))} – ${esc(fmtR(end))}</span></h2>
+    <div class="kies-datum">
+      <h2>Week ${weekNr(start)} <span style="font-weight:500;color:var(--muted);font-size:15px;text-transform:none">${esc(fmtR(start))} – ${esc(fmtR(end))}</span>${ICON_KIES}</h2>
+      <input id="weekKiezer" type="date" value="${S.week}" aria-label="Kies een week">
+    </div>
     ${S.week === iso(monday(new Date())) ? "" : `<button class="link-btn" type="button" data-act="week" data-n="0">Nu</button>`}
     <button class="icon-btn" type="button" data-act="week" data-n="1" aria-label="Volgende week">${ICON_R}</button>
   </div>`;
+  let nKlaar = 0;
   for (let i = 0; i < 7; i++){
     const d = iso(addDays(start, i));
-    const items = itemsOpDag(all, d).sort(sortByTime);
-    const open = items.filter(t => !t.klaar).length;
+    const alles = itemsOpDag(all, d).sort(sortByTime);
+    const open = alles.filter(t => !t.klaar).length;
+    nKlaar += alles.length - open;
+    const items = S.toonKlaar ? alles : alles.filter(t => !t.klaar);
     h += `<section class="day">
       <div class="day-h">
         <button type="button" data-act="goto-day" data-id="${d}">${esc(cap(fmtKort(d)))}</button>
         ${d === today ? `<span class="today">Vandaag</span>` : ""}
         ${d === verh ? `<span class="move">Verhuisdag</span>` : ""}
-        <span class="n">${items.length ? `${open} open` : ""}</span>
+        <span class="n">${alles.length ? `${open} open` : ""}</span>
       </div>
       ${listHtml(items, "", "", {hideDate:true, compact:true}, {datum:d})}
     </section>`;
   }
+  if (nKlaar) h += toonKlaarKnop(nKlaar);
   return h;
 }
 function viewTaken(){
@@ -715,7 +742,8 @@ function viewWie(){
     const mine = S.tasks.filter(t => t.soort !== "boodschap" && (t.wie === p.id || t.wie === "samen"));
     const open = mine.filter(t => !t.klaar);
     const late = open.filter(t => t.datum && t.datum < today).length;
-    const next = open.filter(t => t.datum && t.datum >= today).sort(sortTasks)[0];
+    // echt de eerstvolgende: op datum en tijd, niet eerst de belangrijke
+    const next = open.filter(t => t.datum && t.datum >= today).sort((a,b) => (a.datum + (a.tijd||"99")).localeCompare(b.datum + (b.tijd||"99")))[0];
     h += `<div class="person">
       <div class="person-h">
         <span class="avatar" style="background:${esc(p.kleur)}">${esc((p.naam||"?").trim().charAt(0).toUpperCase())}</span>
@@ -756,7 +784,8 @@ function render(){
   const main = $("#view");
   // een live update mag het veld waarin je aan het typen bent niet wegvegen
   const ae = document.activeElement;
-  const focusId = ae && ae.id && main.contains(ae) ? ae.id : null;
+  // datumvelden niet: die openen anders opnieuw de kalender, en setSelectionRange werkt er niet op
+  const focusId = ae && ae.id && main.contains(ae) && ae.type !== "date" && ae.type !== "time" ? ae.id : null;
   main.innerHTML = views[S.view]();
   if (focusId){ const el = document.getElementById(focusId); if (el){ el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); } }
   document.querySelectorAll("#tabs button").forEach(b => {
@@ -938,10 +967,12 @@ async function wisMandje(winkelId){
 }
 
 /* ---------- opslaan ---------- */
-function toast(msg){
+// actie (optioneel): {label, fn}, bijvoorbeeld "Ongedaan maken"; dan blijft de melding iets langer staan
+function toast(msg, actie){
   const host = $("#toastHost");
-  host.innerHTML = `<div class="toast" role="status">${esc(msg)}</div>`;
-  clearTimeout(toast.t); toast.t = setTimeout(() => host.innerHTML = "", 2200);
+  S.toastActie = actie || null;
+  host.innerHTML = `<div class="toast" role="status"><span>${esc(msg)}</span>${actie ? `<button type="button" data-act="toast-actie">${esc(actie.label)}</button>` : ""}</div>`;
+  clearTimeout(toast.t); toast.t = setTimeout(() => { host.innerHTML = ""; S.toastActie = null; }, actie ? 5000 : 2200);
 }
 function failMsg(e){
   if (e && (e.code === "permission-denied" || e.code === "invalid_argument")) return "Dit account mag niets opslaan. Vraag Robin om je e-mailadres toe te voegen.";
@@ -1013,11 +1044,14 @@ async function toggleTask(id, mode){
     }));
     if (ok){
       const p = personById(wie);
-      toast(`Gedaan. Volgende keer ${fmtKort(volgende)}${t.wisselen && p ? ", " + p.naam + " is aan de beurt" : ""}`);
+      toast(`Gedaan. Volgende keer ${fmtKort(volgende)}${t.wisselen && p ? ", " + p.naam + " is aan de beurt" : ""}`,
+        {label: "Ongedaan maken", fn: () => toggleTask(id, "undo")});
     }
   } else {
     const klaar = !t.klaar;
-    await write(db => db.doc("tasks/"+id).update({klaar, klaarOp: klaar ? new Date().toISOString() : null}));
+    const ok = await write(db => db.doc("tasks/"+id).update({klaar, klaarOp: klaar ? new Date().toISOString() : null}));
+    // boodschappen blijven in het mandje staan, de rest verdwijnt uit beeld: geef dan even de kans om terug te draaien
+    if (ok && klaar && t.soort !== "boodschap") toast("Afgevinkt", {label: "Ongedaan maken", fn: () => toggleTask(id)});
   }
   S.busy.delete(id);
 }
@@ -1081,6 +1115,13 @@ document.addEventListener("click", e => {
       closeSheet();
       break;
     }
+    case "toon-klaar": S.toonKlaar = !S.toonKlaar; render(); break;
+    case "toast-actie": {
+      const actie = S.toastActie;
+      S.toastActie = null; clearTimeout(toast.t); $("#toastHost").innerHTML = "";
+      if (actie) actie.fn();
+      break;
+    }
     case "ww-vergeten": wachtwoordMail(); break;
     case "uitloggen": signOut(FB.auth); break;
     case "edit-instellingen": openSheet({type:"instellingen", data:{adres: ADRES, verhuisdag: VERHUISDAG ? iso(VERHUISDAG) : ""}}); break;
@@ -1121,6 +1162,8 @@ document.addEventListener("submit", e => {
   }
 });
 document.addEventListener("change", e => {
+  if (e.target.id === "dagKiezer" && e.target.value){ S.dag = e.target.value; render(); return; }
+  if (e.target.id === "weekKiezer" && e.target.value){ S.week = iso(monday(parse(e.target.value))); render(); return; }
   if (e.target.id === "importFile" && e.target.files[0]){ importeren(e.target.files[0]); e.target.value = ""; }
 });
 document.addEventListener("input", e => {
