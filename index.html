@@ -343,7 +343,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "9 okt 2026 · 6";
+const VERSIE = "9 okt 2026 · 7";
 
 (function(){
 "use strict";
@@ -820,7 +820,7 @@ function projectKaart(p){
   return `<div class="project" role="button" tabindex="0" data-act="open-project" data-id="${esc(p.id)}" style="--pk:${esc(p.kleur || "#EE4E5A")}">
     <div class="project-h"><b>${esc(p.naam)}</b>${p.datum ? `<span class="aftel">${esc(aftelTekst(p.datum))}</span>` : ""}</div>
     <div class="pbar"><i style="width:${pct}%"></i></div>
-    <div class="project-m"><span>${s.klaar} van ${s.totaal} ${s.totaal === 1 ? "taak" : "taken"} klaar</span>${delen.length ? `<span>${delen.join(" · ")}</span>` : ""}</div>
+    <div class="project-m"><span>${s.totaal ? `${s.klaar} van ${s.totaal} ${s.totaal === 1 ? "taak" : "taken"} klaar` : "Nog geen taken"}</span>${delen.length ? `<span>${delen.join(" · ")}</span>` : ""}</div>
     ${s.volgende ? `<div class="project-v">Eerstvolgend: <b>${esc(s.volgende.titel)}</b> · ${esc(fmtKort(s.volgende.datum))}</div>` : ""}
   </div>`;
 }

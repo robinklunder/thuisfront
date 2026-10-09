@@ -1,5 +1,5 @@
 // Het Thuisfront: eerst het netwerk (altijd de nieuwste versie), de cache alleen als je offline bent.
-const CACHE = "thuisfront-v6";
+const CACHE = "thuisfront-v7";
 const SCHIL = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {
