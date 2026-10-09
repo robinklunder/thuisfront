@@ -104,6 +104,7 @@ img{max-width:100%}
 .li-row.done .check{background:var(--teal);border-color:var(--teal)}
 .li-row.done .check svg{opacity:1;color:var(--teal-ink)}
 .li-t{flex:1;min-width:0;overflow-wrap:anywhere;font-size:14.5px}
+button.li-t{border:0;background:transparent;padding:4px 0;text-align:left;color:inherit;cursor:pointer}
 .li-row.done .li-t{text-decoration:line-through;color:var(--muted)}
 .mini{border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:3px 8px;font-size:12px;font-weight:600;color:var(--accent);flex:0 0 auto}
 .mini.x{color:var(--muted);font-size:16px;line-height:1;padding:3px 8px}
@@ -343,7 +344,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "9 okt 2026 · 7";
+const VERSIE = "9 okt 2026 · 8";
 
 (function(){
 "use strict";
@@ -866,7 +867,7 @@ function notitieKaart(n){
       <div class="notitie-h" role="button" tabindex="0" data-act="edit-notitie" data-id="${esc(n.id)}"><span class="soort">Lijst</span><b>${esc(n.titel)}</b><span class="n">${af}/${items.length}</span></div>
       ${items.length ? `<div class="li">${items.map(i => `<div class="li-row${i.klaar ? " done" : ""}">
         <button class="check" type="button" data-act="li-toggle" data-id="${esc(n.id)}" data-item="${esc(i.id)}" aria-label="${i.klaar ? "Terugzetten" : "Afvinken"}: ${esc(i.tekst)}" ${S.canWrite ? "" : "disabled"}>${ICON_CHECK}</button>
-        <span class="li-t">${esc(i.tekst)}</span>
+        ${S.canWrite ? `<button class="li-t" type="button" data-act="li-edit" data-id="${esc(n.id)}" data-item="${esc(i.id)}" aria-label="Wijzig ${esc(i.tekst)}">${esc(i.tekst)}</button>` : `<span class="li-t">${esc(i.tekst)}</span>`}
         ${i.taak ? `<span class="omgezet">Taak</span>` : S.canWrite ? `<button class="mini" type="button" data-act="li-taak" data-id="${esc(n.id)}" data-item="${esc(i.id)}">Maak taak</button>` : ""}
         ${S.canWrite ? `<button class="mini x" type="button" data-act="li-weg" data-id="${esc(n.id)}" data-item="${esc(i.id)}" aria-label="Verwijder ${esc(i.tekst)}">×</button>` : ""}
       </div>`).join("")}</div>` : ""}
@@ -1028,6 +1029,15 @@ function renderSheet(){
         <div class="right"><button type="button" class="btn" data-act="close">Annuleer</button><button type="submit" class="btn primary">Bewaar</button></div>
       </div>
     </form>`;
+  } else if (s.type === "lijstpunt"){
+    inner = `<h2>Punt wijzigen</h2>
+    <form class="form" id="lijstpuntForm" autocomplete="off">
+      <div class="fld"><label for="lp-tekst">Tekst</label><input id="lp-tekst" required maxlength="120" value="${esc(s.data.tekst||"")}"></div>
+      <div class="actions">
+        <button type="button" class="btn danger${s.armed ? " armed" : ""}" data-act="delete-lijstpunt">${s.armed ? "Echt verwijderen" : "Verwijderen"}</button>
+        <div class="right"><button type="button" class="btn" data-act="close">Annuleer</button><button type="submit" class="btn primary">Bewaar</button></div>
+      </div>
+    </form>`;
   } else if (s.type === "notitie"){
     const n = s.data, lijst = n.soort === "lijst";
     inner = `<h2>${s.id ? (lijst ? "Lijst wijzigen" : "Idee wijzigen") : (lijst ? "Nieuwe lijst" : "Nieuw idee")}</h2>
@@ -1079,7 +1089,7 @@ function renderSheet(){
     <div class="actions"><div class="right"><button type="button" class="btn" data-act="close">Sluit</button></div></div>`;
   }
   $("#sheetHost").innerHTML = `<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div></div>`;
-  const first = $("#f-titel") || $("#b-titel") || $("#w-naam") || $("#p-naam") || $("#pr-naam") || $("#no-titel");
+  const first = $("#f-titel") || $("#b-titel") || $("#w-naam") || $("#p-naam") || $("#pr-naam") || $("#no-titel") || $("#lp-tekst");
   if (first && !s.id && !s.focused){ s.focused = true; setTimeout(() => first.focus(), 50); }
 }
 // leest het formulier terug in de sheet-toestand, zodat een herteken niets kwijtraakt
@@ -1095,6 +1105,7 @@ function captureForm(){
   }
   if (s.type === "person" && $("#p-naam")){ s.data.naam = $("#p-naam").value; s.data.rol = $("#p-helper").checked ? "helper" : ""; }
   if (s.type === "winkel" && $("#w-naam")) s.data.naam = $("#w-naam").value;
+  if (s.type === "lijstpunt" && $("#lp-tekst")) s.data.tekst = $("#lp-tekst").value;
   if (s.type === "project" && $("#pr-naam")){
     Object.assign(s.data, {naam: $("#pr-naam").value, omschrijving: $("#pr-omschr").value, datum: $("#pr-datum").value});
     if ($("#pr-af")) s.data.status = $("#pr-af").checked ? "afgerond" : "lopend";
@@ -1411,6 +1422,18 @@ document.addEventListener("click", e => {
       break;
     }
     case "li-toggle": { const it = a.dataset.item; wijzigLijst(id, items => items.map(i => i.id === it ? Object.assign({}, i, {klaar: !i.klaar}) : i)); break; }
+    case "li-edit": {
+      const n = S.notities.find(x => x.id === id); if (!n) return;
+      const item = (n.items || []).find(i => i.id === a.dataset.item); if (!item) return;
+      openSheet({type:"lijstpunt", data:{lijst: n.id, item: item.id, tekst: item.tekst}});
+      break;
+    }
+    case "delete-lijstpunt": {
+      if (!S.sheet.armed){ S.sheet.data.tekst = $("#lp-tekst").value; S.sheet.armed = true; renderSheet(); return; }
+      const {lijst, item} = S.sheet.data; closeSheet();
+      wijzigLijst(lijst, items => items.filter(i => i.id !== item), "Punt verwijderd");
+      break;
+    }
     case "li-weg": { const it = a.dataset.item; wijzigLijst(id, items => items.filter(i => i.id !== it), "Punt verwijderd"); break; }
     case "toast-actie": {
       const actie = S.toastActie;
@@ -1449,6 +1472,12 @@ document.addEventListener("submit", e => {
   if (e.target.id === "loginForm") inloggen();
   if (e.target.id === "projectForm") saveProject();
   if (e.target.id === "notitieForm") saveNotitie();
+  if (e.target.id === "lijstpuntForm"){
+    const tekst = $("#lp-tekst").value.trim();
+    if (!tekst){ $("#lp-tekst").focus(); return; }
+    const {lijst, item} = S.sheet.data; closeSheet();
+    wijzigLijst(lijst, items => items.map(i => i.id === item ? Object.assign({}, i, {tekst}) : i));
+  }
   if (e.target.classList.contains("li-add")) lijstToevoegen(e.target.dataset.id, e.target.querySelector("input"));
   if (e.target.id === "instForm") saveInstellingen();
   if (e.target.id === "taskForm") saveTask();
