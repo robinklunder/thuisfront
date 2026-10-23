@@ -56,6 +56,17 @@ body{margin:0;-webkit-text-size-adjust:100%}
 img{max-width:100%}
 [hidden]{display:none!important}
 
+/* Face ID-slot: ligt over alles heen zolang html de klasse op-slot heeft */
+.slot{display:none;position:fixed;inset:0;z-index:95;background:var(--bg);place-items:center;padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 16px)}
+html.op-slot .slot{display:grid}
+html.op-slot body{overflow:hidden}
+.slot-in{display:grid;gap:12px;justify-items:center;text-align:center;max-width:320px}
+.slot-in img{width:84px;height:84px;border-radius:20px;box-shadow:var(--shadow)}
+.slot-in h2{margin:4px 0 0;font-family:var(--f-display);font-weight:800;font-size:26px}
+.slot-in p{margin:0;color:var(--muted)}
+.slot-in .btn{padding:12px 20px;font-size:15px}
+.set-row small{display:block;font-size:12px;color:var(--muted);font-weight:400}
+
 /* inloggen */
 .login{position:fixed;inset:0;z-index:80;background:var(--bg);display:grid;place-items:center;padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 16px);overflow-y:auto}
 .login-card{width:100%;max-width:380px;display:grid;gap:10px;text-align:center}
@@ -351,6 +362,10 @@ button{cursor:pointer}
 
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
+<script>
+  // Face ID-slot meteen tonen, nog vóór de rest van de app geladen is, zodat er niets doorschemert
+  try { if (localStorage.getItem("thuisfront.faceid")) document.documentElement.classList.add("op-slot"); } catch(e){}
+</script>
 </head>
 <body>
 
@@ -387,6 +402,15 @@ button{cursor:pointer}
 <div id="sheetHost"></div>
 <div id="toastHost"></div>
 <div id="loginHost"></div>
+<div id="slot" class="slot" role="dialog" aria-modal="true" aria-label="Het Thuisfront is vergrendeld">
+  <div class="slot-in">
+    <img src="icon-192.png" alt="" width="84" height="84">
+    <h2>Het Thuisfront</h2>
+    <p id="slotMsg">Vergrendeld met Face ID</p>
+    <button class="btn primary" type="button" data-act="ontgrendel">Ontgrendel met Face ID</button>
+    <button class="link-btn" type="button" data-act="slot-wachtwoord">Lukt het niet? Log opnieuw in met je wachtwoord</button>
+  </div>
+</div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -402,7 +426,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "23 okt 2026 · 13";
+const VERSIE = "23 okt 2026 · 14";
 
 (function(){
 "use strict";
@@ -436,6 +460,66 @@ const fmtKort = s => parse(s).toLocaleDateString("nl-NL",{weekday:"short", day:"
 const euro = new Intl.NumberFormat("nl-NL",{style:"currency",currency:"EUR"});
 const lsGet = k => { try { return localStorage.getItem("thuisfront."+k); } catch(e){ return null; } };
 const lsSet = (k,v) => { try { localStorage.setItem("thuisfront."+k, v); } catch(e){} };
+const lsWeg = k => { try { localStorage.removeItem("thuisfront."+k); } catch(e){} };
+
+/* ---------- Face ID-slot (alleen op deze telefoon) ----------
+   Werkt met een toegangssleutel (passkey) die de iPhone voor dit adres maakt en met Face ID beschermt.
+   Het is een slot op het scherm: de gegevens zelf zijn al beveiligd met de inlog. Er gaat niets naar een server. */
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const vanB64u = s => { const t = s.replace(/-/g,"+").replace(/_/g,"/"); return Uint8Array.from(atob(t + "=".repeat((4 - t.length % 4) % 4)), c => c.charCodeAt(0)); };
+const kanFaceId = () => !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
+const slotAan = () => !!lsGet("faceid");
+const slotDicht = () => document.documentElement.classList.contains("op-slot");
+function toonSlot(){ if (slotAan()) document.documentElement.classList.add("op-slot"); }
+function verbergSlot(){ document.documentElement.classList.remove("op-slot"); }
+let bezigMetFaceId = false;
+async function ontgrendel(){
+  const id = lsGet("faceid");
+  if (!id){ verbergSlot(); return; }
+  if (bezigMetFaceId) return;
+  bezigMetFaceId = true;
+  const msg = document.getElementById("slotMsg");
+  try {
+    await navigator.credentials.get({publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)), rpId: location.hostname, timeout: 60000,
+      allowCredentials: [{type: "public-key", id: vanB64u(id), transports: ["internal"]}], userVerification: "required",
+    }});
+    verbergSlot();
+    if (msg) msg.textContent = "Vergrendeld met Face ID";
+  } catch(e){
+    if (msg) msg.textContent = "Ontgrendelen lukte niet. Tik op de knop om het opnieuw te proberen.";
+  }
+  bezigMetFaceId = false;
+}
+async function faceIdAanzetten(){
+  if (!kanFaceId()){ toast("Face ID werkt niet in deze browser."); return; }
+  try {
+    const c = await navigator.credentials.create({publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: {name: "Het Thuisfront", id: location.hostname},
+      user: {id: crypto.getRandomValues(new Uint8Array(16)), name: (S.user && S.user.email) || "Het Thuisfront", displayName: "Het Thuisfront"},
+      pubKeyCredParams: [{type: "public-key", alg: -7}, {type: "public-key", alg: -257}],
+      authenticatorSelection: {authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged"},
+      timeout: 60000, attestation: "none",
+    }});
+    lsSet("faceid", b64u(c.rawId));
+    render();
+    toast("Face ID staat aan op deze telefoon");
+  } catch(e){
+    toast(e && e.name === "NotAllowedError" ? "Face ID is niet aangezet." : "Face ID aanzetten lukte niet op deze telefoon.");
+  }
+}
+function faceIdUit(){ lsWeg("faceid"); verbergSlot(); render(); toast("Face ID staat uit op deze telefoon"); }
+// Naar de achtergrond: meteen het slot erover (ook in het overzicht van open apps). Binnen een minuut
+// terug en hij was open: zonder Face ID weer open. Langer weg, of hij was al dicht: Face ID vragen.
+let wegSinds = 0, wasOpen = false;
+document.addEventListener("visibilitychange", () => {
+  if (!slotAan() || bezigMetFaceId) return;
+  if (document.visibilityState === "hidden"){ wasOpen = !slotDicht(); wegSinds = Date.now(); toonSlot(); return; }
+  if (wasOpen && Date.now() - wegSinds < 60000){ verbergSlot(); return; }
+  ontgrendel();
+});
+if (slotAan()){ toonSlot(); setTimeout(ontgrendel, 300); }
 const weekNr = d => { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-day); const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil(((t-y0)/864e5+1)/7); };
 
 /* ---------- herhalen ---------- */
@@ -1154,6 +1238,7 @@ function instellingenHtml(){
       <button class="set-row" type="button" data-act="edit-instellingen"><span>Nieuw adres</span><b>${esc(ADRES || "Nog niet ingesteld")}</b></button>
       <button class="set-row" type="button" data-act="edit-instellingen"><span>Verhuisdag</span><b>${esc(dag)}</b></button>
       <label class="set-row" for="importFile"><span>Gegevens importeren</span><b>Kies bestand</b></label>
+      ${kanFaceId() ? `<button class="set-row" type="button" data-act="faceid"><span>Openen met Face ID<small>Alleen op deze telefoon</small></span><b>${slotAan() ? "Aan" : "Uit"}</b></button>` : ""}
       <button class="set-row" type="button" data-act="ww-vergeten"><span>Wachtwoord wijzigen</span><b>Stuur mail</b></button>
       <button class="set-row" type="button" data-act="uitloggen"><span>Ingelogd als ${esc(S.user.email || "")}</span><b class="out">Uitloggen</b></button>
     </div>
@@ -1887,6 +1972,13 @@ document.addEventListener("click", e => {
       break;
     }
     case "ww-vergeten": wachtwoordMail(); break;
+    case "faceid": if (slotAan()) faceIdUit(); else faceIdAanzetten(); break;
+    case "ontgrendel": ontgrendel(); break;
+    case "slot-wachtwoord":
+      // noodweg: Face ID uit op deze telefoon, uitloggen en opnieuw inloggen met het wachtwoord
+      lsWeg("faceid"); verbergSlot();
+      if (FB.auth) signOut(FB.auth);
+      break;
     case "uitloggen": signOut(FB.auth); break;
     case "edit-instellingen": openSheet({type:"instellingen", data:{adres: ADRES, verhuisdag: VERHUISDAG ? iso(VERHUISDAG) : ""}}); break;
     case "set-ik": S.ik = id; lsSet("ik", id); if (S.sheet && S.sheet.type === "ik") closeSheet(); render(); toast("Onthouden op deze telefoon"); break;
