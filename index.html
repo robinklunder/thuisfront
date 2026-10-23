@@ -104,6 +104,12 @@ img{max-width:100%}
 .li-row.done .check{background:var(--teal);border-color:var(--teal)}
 .li-row.done .check svg{opacity:1;color:var(--teal-ink)}
 .li-t{flex:1;min-width:0;overflow-wrap:anywhere;font-size:14.5px}
+/* sleepgreep: alleen hier begint slepen, zodat de rest van de lijst gewoon scrolt */
+.grip{flex:0 0 auto;width:24px;height:34px;margin-left:-8px;display:grid;place-items:center;color:var(--muted);touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.grip svg{width:11px;height:17px}
+.li-row.sleept{position:relative;z-index:5;background:var(--surface);border-radius:10px;box-shadow:var(--shadow),0 0 0 2px var(--accent)}
+.li-row.sleept .grip{cursor:grabbing;color:var(--accent)}
+body.slepen{-webkit-user-select:none;user-select:none}
 button.li-t{border:0;background:transparent;padding:4px 0;text-align:left;color:inherit;cursor:pointer}
 .li-row.done .li-t{text-decoration:line-through;color:var(--muted)}
 .mini{border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:3px 8px;font-size:12px;font-weight:600;color:var(--accent);flex:0 0 auto}
@@ -344,7 +350,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "9 okt 2026 · 8";
+const VERSIE = "23 okt 2026 · 9";
 
 (function(){
 "use strict";
@@ -460,6 +466,7 @@ function bewaarIcs(t, alarm){
 }
 
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+const ICON_GRIP = '<svg viewBox="0 0 12 18" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.6"/><circle cx="9" cy="3" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="9" cy="9" r="1.6"/><circle cx="3" cy="15" r="1.6"/><circle cx="9" cy="15" r="1.6"/></svg>';
 const ICON_KIES = '<svg class="kies-pijl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 const ICON_CAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M12 13v4M10 15h4"/></svg>';
 const ICON_REP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5M20 4v4.5h-4.5M20 12a8 8 0 0 1-13.7 5.6L4 15.5M4 20v-4.5h4.5"/></svg>';
@@ -865,7 +872,8 @@ function notitieKaart(n){
     const af = items.filter(i => i.klaar).length;
     return `<div class="notitie">
       <div class="notitie-h" role="button" tabindex="0" data-act="edit-notitie" data-id="${esc(n.id)}"><span class="soort">Lijst</span><b>${esc(n.titel)}</b><span class="n">${af}/${items.length}</span></div>
-      ${items.length ? `<div class="li">${items.map(i => `<div class="li-row${i.klaar ? " done" : ""}">
+      ${items.length ? `<div class="li">${items.map(i => `<div class="li-row${i.klaar ? " done" : ""}" data-item="${esc(i.id)}">
+        ${S.canWrite && items.length > 1 ? `<span class="grip" data-id="${esc(n.id)}" aria-hidden="true">${ICON_GRIP}</span>` : ""}
         <button class="check" type="button" data-act="li-toggle" data-id="${esc(n.id)}" data-item="${esc(i.id)}" aria-label="${i.klaar ? "Terugzetten" : "Afvinken"}: ${esc(i.tekst)}" ${S.canWrite ? "" : "disabled"}>${ICON_CHECK}</button>
         ${S.canWrite ? `<button class="li-t" type="button" data-act="li-edit" data-id="${esc(n.id)}" data-item="${esc(i.id)}" aria-label="Wijzig ${esc(i.tekst)}">${esc(i.tekst)}</button>` : `<span class="li-t">${esc(i.tekst)}</span>`}
         ${i.taak ? `<span class="omgezet">Taak</span>` : S.canWrite ? `<button class="mini" type="button" data-act="li-taak" data-id="${esc(n.id)}" data-item="${esc(i.id)}">Maak taak</button>` : ""}
@@ -931,6 +939,8 @@ function instellingenHtml(){
 }
 
 function render(){
+  // tijdens het slepen niet opnieuw tekenen (bijv. door een wijziging van de ander), anders valt het punt uit je vinger
+  if (sleep) return;
   const views = {dag:viewDag, week:viewWeek, taken:viewTaken, projecten:viewProjecten, kopen:viewKopen, wie:viewWie};
   if (!views[S.view]) S.view = "dag";
   const main = $("#view");
@@ -1489,6 +1499,50 @@ document.addEventListener("submit", e => {
     snelToevoegen(wid, input);
   }
 });
+/* ---------- punten van een lijst verslepen ---------- */
+// Werkt met vinger en muis (pointer events). Het punt verhuist in de pagina zodra je voorbij het midden
+// van een ander punt komt; bij loslaten bewaren we de nieuwe volgorde in één keer.
+let sleep = null;
+document.addEventListener("pointerdown", e => {
+  const grip = e.target.closest(".grip");
+  if (!grip || !S.canWrite || sleep) return;
+  const rij = grip.closest(".li-row"), lijst = rij && rij.parentElement;
+  if (!lijst) return;
+  e.preventDefault();
+  try { grip.setPointerCapture(e.pointerId); } catch(_){}
+  sleep = {rij, lijst, id: grip.dataset.id, pid: e.pointerId, voor: [...lijst.children].map(r => r.dataset.item)};
+  rij.classList.add("sleept");
+  document.body.classList.add("slepen");
+});
+document.addEventListener("pointermove", e => {
+  if (!sleep || e.pointerId !== sleep.pid) return;
+  e.preventDefault();
+  const y = e.clientY;
+  // bij de rand van het scherm meescrollen
+  if (y < 90) window.scrollBy(0, -10); else if (y > innerHeight - 160) window.scrollBy(0, 10);
+  let doel = null;
+  for (const r of sleep.lijst.children){
+    if (r === sleep.rij) continue;
+    const b = r.getBoundingClientRect();
+    if (y < b.top + b.height / 2){ doel = r; break; }
+  }
+  if (doel !== sleep.rij.nextElementSibling) sleep.lijst.insertBefore(sleep.rij, doel);
+}, {passive: false});
+function stopSlepen(e){
+  if (!sleep || (e && e.pointerId !== sleep.pid)) return;
+  const {rij, lijst, id, voor} = sleep;
+  sleep = null;
+  rij.classList.remove("sleept");
+  document.body.classList.remove("slepen");
+  const na = [...lijst.children].map(r => r.dataset.item);
+  if (na.join("|") === voor.join("|")){ render(); return; }
+  // nieuwe volgorde; punten die intussen door de ander zijn toegevoegd, komen achteraan
+  // daarna altijd opnieuw tekenen: lukt bewaren niet, dan springt de lijst terug naar de echte volgorde
+  wijzigLijst(id, items => na.map(k => items.find(i => i.id === k)).filter(Boolean).concat(items.filter(i => !na.includes(i.id)))).then(() => render());
+}
+document.addEventListener("pointerup", stopSlepen);
+document.addEventListener("pointercancel", stopSlepen);
+
 document.addEventListener("change", e => {
   if (e.target.id === "dagKiezer" && e.target.value){ S.dag = e.target.value; render(); return; }
   if (e.target.id === "weekKiezer" && e.target.value){ S.week = iso(monday(parse(e.target.value))); render(); return; }
