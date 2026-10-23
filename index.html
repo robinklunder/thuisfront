@@ -426,7 +426,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "23 okt 2026 · 14";
+const VERSIE = "23 okt 2026 · 15";
 
 (function(){
 "use strict";
@@ -1136,9 +1136,8 @@ function viewLasten(){
     h += secHtml("Vaste lasten", "", `<div class="list"><div class="empty"><b>Nog geen vaste lasten</b>Zet hier energie, internet, verzekeringen en abonnementen, met het bedrag en tot wanneer het contract loopt.</div>${S.canWrite ? `<button class="add-inline" type="button" data-act="new-last">+ Toevoegen</button>` : ""}</div>`);
     return h;
   }
-  // blokken: gezamenlijk, daarna per persoon; binnen een blok op soort en naam
-  const rang = s => { const i = LAST_SOORTEN.indexOf(s); return i < 0 ? 99 : i; };
-  const sorteerLasten = arr => arr.sort((a,b) => rang(a.soort || "Overig") - rang(b.soort || "Overig") || String(a.naam).localeCompare(String(b.naam), "nl"));
+  // blokken: gezamenlijk, daarna per persoon; binnen een blok van hoog naar laag (omgerekend per maand)
+  const sorteerLasten = arr => arr.sort((a,b) => perMaand(b) - perMaand(a) || String(a.naam).localeCompare(String(b.naam), "nl"));
   const blokken = [["samen", "Gezamenlijke lasten", L.filter(l => lastVanWie(l) === "samen")]]
     .concat(huisgenoten().map(p => [p.id, "Lasten van " + p.naam, L.filter(l => lastVanWie(l) === p.id)]));
   for (const [wie, kop, its] of blokken){
