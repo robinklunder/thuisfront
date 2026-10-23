@@ -136,6 +136,12 @@ button.li-t{border:0;background:transparent;padding:4px 0;text-align:left;color:
 .over-kaart.tekort{background:var(--danger-soft);border-color:var(--danger)}
 .over-kaart.tekort span{color:var(--danger)}
 .price.plus{color:var(--teal)}
+/* vegen: de regel schuift naar links; in de vrijgekomen ruimte (een schaduw) staat "Verwijderen" */
+.row.veeg{position:relative;touch-action:pan-y}
+.row.veegt{z-index:2;transform:translateX(var(--dx,0));background:var(--surface);box-shadow:var(--d,0) 0 0 var(--danger-soft)}
+.row.veegt::after{content:"Verwijderen";position:absolute;left:calc(100% + 14px);top:50%;transform:translateY(-50%);font-size:13px;font-weight:700;color:var(--danger);white-space:nowrap}
+.row.veegt.ver-genoeg{box-shadow:var(--d,0) 0 0 var(--danger)}
+.row.veegt.ver-genoeg::after{content:"Loslaten";color:#fff}
 .verdeling{margin-top:14px;display:grid;gap:0}
 .verdeling > span{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
 .verdeling .seg{margin-block:6px 0}
@@ -396,7 +402,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "23 okt 2026 · 12";
+const VERSIE = "23 okt 2026 · 13";
 
 (function(){
 "use strict";
@@ -969,7 +975,7 @@ function lastRij(l, letop){
     meta.push(`<span class="over">${n < 0 ? "Opzegdatum is voorbij" : n === 0 ? "Vandaag uiterlijk opzeggen" : `Nog ${n} ${n === 1 ? "dag" : "dagen"} om op te zeggen`}</span>`);
   } else meta.push(`<span>${l.einde ? "Loopt tot " + esc(datumMetJaar(l.einde)) : "Loopt door"}</span>`);
   const per = (PERIODES.find(p => p[0] === l.periode) || PERIODES[0])[2];
-  return `<div class="row" data-item="${esc(l.id)}">
+  return `<div class="row${S.canWrite ? " veeg" : ""}" data-item="${esc(l.id)}" data-veeg="lasten">
     <button class="body" type="button" data-act="edit-last" data-id="${esc(l.id)}"><div class="ttl">${esc(l.naam)}</div><div class="meta">${meta.join("")}</div></button>
     ${typeof l.bedrag === "number" ? `<span class="price">${euro.format(l.bedrag)}<small>${per}</small></span>` : ""}
   </div>`;
@@ -1017,7 +1023,7 @@ function inkomenRij(i){
   const wie = i.wie === "samen" ? "Samen" : p ? p.naam : "";
   const per = (PERIODES.find(x => x[0] === i.periode) || PERIODES[0])[2];
   const meta = [wie ? `<span class="who">${p ? `<span class="dot" style="background:${esc(p.kleur)}"></span>` : ""}${esc(wie)}</span>` : "", i.periode && i.periode !== "maand" ? `<span>${euro.format(perMaand(i))} per maand</span>` : "", i.notitie ? `<span>${esc(i.notitie)}</span>` : ""].filter(Boolean);
-  return `<div class="row" data-item="${esc(i.id)}">
+  return `<div class="row${S.canWrite ? " veeg" : ""}" data-item="${esc(i.id)}" data-veeg="inkomsten">
     <button class="body" type="button" data-act="edit-inkomen" data-id="${esc(i.id)}"><div class="ttl">${esc(i.naam)}</div><div class="meta">${meta.join("")}</div></button>
     ${typeof i.bedrag === "number" ? `<span class="price plus">${euro.format(i.bedrag)}<small>${per}</small></span>` : ""}
   </div>`;
@@ -1653,6 +1659,61 @@ async function toggleTask(id, mode){
 }
 
 /* ---------- interactie ---------- */
+/* ---------- naar links vegen om te verwijderen (inkomen en vaste lasten) ---------- */
+// Pas als de vinger duidelijk zijwaarts gaat (meer dan 12 px en ruim meer dan verticaal) nemen we het over;
+// anders scrolt de pagina gewoon. Voorbij 96 px en loslaten = verwijderen, met "Ongedaan maken".
+const VEEG_DREMPEL = 96;
+let veeg = null, veegNet = false;
+document.addEventListener("pointerdown", e => {
+  const rij = e.target.closest(".row.veeg");
+  if (!rij || e.target.closest(".grip") || !S.canWrite || sleep) return;
+  veeg = {rij, x: e.clientX, y: e.clientY, pid: e.pointerId, actief: false, dx: 0};
+});
+document.addEventListener("pointermove", e => {
+  if (!veeg || e.pointerId !== veeg.pid) return;
+  const dx = e.clientX - veeg.x, dy = e.clientY - veeg.y;
+  if (!veeg.actief){
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)){ veeg = null; return; }   // het is scrollen
+    if (dx < -12 && Math.abs(dx) > 1.6 * Math.abs(dy)){
+      veeg.actief = true;
+      try { veeg.rij.setPointerCapture(e.pointerId); } catch(_){}
+      veeg.rij.classList.add("veegt");
+    } else return;
+  }
+  e.preventDefault();
+  veeg.dx = Math.min(0, dx);
+  veeg.rij.style.setProperty("--dx", veeg.dx + "px");
+  veeg.rij.style.setProperty("--d", -veeg.dx + "px");
+  veeg.rij.classList.toggle("ver-genoeg", -veeg.dx >= VEEG_DREMPEL);
+}, {passive: false});
+function stopVeeg(e){
+  if (!veeg || (e && e.pointerId !== veeg.pid)) return;
+  const {rij, actief, dx} = veeg;
+  veeg = null;
+  if (!actief) return;
+  veegNet = true; setTimeout(() => { veegNet = false; }, 350);   // de klik na het vegen niet als tik tellen
+  if (-dx >= VEEG_DREMPEL && e.type === "pointerup"){
+    rij.style.display = "none";
+    veegWeg(rij.dataset.veeg, rij.dataset.item);
+  } else {
+    rij.classList.remove("veegt", "ver-genoeg");
+    rij.style.removeProperty("--dx"); rij.style.removeProperty("--d");
+  }
+}
+document.addEventListener("pointerup", stopVeeg);
+document.addEventListener("pointercancel", stopVeeg);
+async function veegWeg(col, id){
+  const lijst = col === "inkomsten" ? S.inkomsten : S.lasten;
+  const item = lijst.find(x => x.id === id);
+  if (!item){ render(); return; }
+  const kopie = Object.assign({}, item); delete kopie.id;
+  const ok = await write(db => db.doc(col + "/" + id).delete());
+  if (ok) toast(`"${item.naam}" verwijderd`, {label: "Ongedaan maken", fn: () => write(db => db.doc(col + "/" + id).set(kopie), "Teruggezet")});
+  else render();
+}
+// een tik die eigenlijk het einde van een veeg was, niet doorgeven
+document.addEventListener("click", e => { if (veegNet){ e.stopPropagation(); e.preventDefault(); veegNet = false; } }, true);
+
 document.addEventListener("click", e => {
   const pick = e.target.closest("[data-pick]");
   if (pick && S.sheet){
