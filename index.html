@@ -107,6 +107,9 @@ img{max-width:100%}
 /* sleepgreep: alleen hier begint slepen, zodat de rest van de lijst gewoon scrolt */
 .grip{flex:0 0 auto;width:24px;height:34px;margin-left:-8px;display:grid;place-items:center;color:var(--muted);touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .grip svg{width:11px;height:17px}
+.row .grip{align-self:center;margin-left:-6px;margin-right:-4px}
+.row.sleept{position:relative;z-index:5;background:var(--surface);box-shadow:var(--shadow),0 0 0 2px var(--accent)}
+.row.sleept .grip{cursor:grabbing;color:var(--accent)}
 .li-row.sleept{position:relative;z-index:5;background:var(--surface);border-radius:10px;box-shadow:var(--shadow),0 0 0 2px var(--accent)}
 .li-row.sleept .grip{cursor:grabbing;color:var(--accent)}
 body.slepen{-webkit-user-select:none;user-select:none}
@@ -350,7 +353,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "23 okt 2026 · 9";
+const VERSIE = "23 okt 2026 · 10";
 
 (function(){
 "use strict";
@@ -529,7 +532,8 @@ function rowHtml(t, opt = {}){
   if (t.belangrijk && !t.klaar) meta.push(`<span class="flag">Belangrijk</span>`);
   const price = (t.soort === "kopen" && typeof t.prijs === "number") ? `<span class="price">${euro.format(t.prijs)}</span>` : "";
   const lbl = t._gedaan ? "Afvinken ongedaan maken" : t.klaar ? "Markeer als open" : "Markeer als klaar";
-  return `<div class="row${t.klaar ? " done" : ""}${t._proj ? " proj" : ""}">
+  return `<div class="row${t.klaar ? " done" : ""}${t._proj ? " proj" : ""}" data-item="${esc(t.id)}">
+    ${opt.sleep && S.canWrite ? `<span class="grip" data-soort="taak" data-id="${esc(opt.sleep)}" aria-hidden="true">${ICON_GRIP}</span>` : ""}
     <button class="check" type="button" data-act="toggle" data-id="${esc(t.id)}" ${t._gedaan ? 'data-mode="undo"' : ""} aria-label="${lbl}: ${esc(t.titel)}" ${S.canWrite && !t._proj ? "" : "disabled"}>${ICON_CHECK}</button>
     <button class="body" type="button" data-act="edit" data-id="${esc(t.id)}">
       <div class="ttl">${esc(t.titel)}</div>
@@ -857,9 +861,11 @@ function viewProject(p){
       : `<div class="list"><div class="empty"><b>Nog geen ideeën of lijsten</b>Schrijf hier alles op wat in je opkomt. Een idee zet je later met één tik om in een taak.</div></div>`;
     return h;
   }
-  const open = s.open.slice().sort(sortTasks);
+  // eigen volgorde (gesleept) eerst; taken zonder volgnummer, zoals nieuwe, daarachter
+  const heeft = t => typeof t.pvolg === "number";
+  const open = s.open.slice().sort((a,b) => (heeft(a) ? a.pvolg : 1e9) - (heeft(b) ? b.pvolg : 1e9) || sortTasks(a,b));
   const klaar = s.taken.filter(t => t.klaar).sort(sortTasks);
-  h += secHtml("Open", open.length, listHtml(open, "Geen open taken", "Voeg een taak toe, of zet een idee om in een taak.", {hideProj:true}, {soort:"taak", project:p.id}));
+  h += secHtml("Open", open.length, listHtml(open, "Geen open taken", "Voeg een taak toe, of zet een idee om in een taak.", {hideProj:true, sleep: open.length > 1 ? p.id : ""}, {soort:"taak", project:p.id}));
   if (klaar.length){
     if (S.toonKlaar) h += secHtml("Klaar", klaar.length, listHtml(klaar, "", "", {hideProj:true, compact:true}));
     h += toonKlaarKnop(klaar.length);
@@ -1217,6 +1223,8 @@ async function saveTask(metAgenda){
     herhaal, wisselen: !!herhaal && !!d.wisselen,
     laatstKlaar: herhaal ? (d.laatstKlaar || null) : null, laatstDoor: herhaal ? (d.laatstDoor || null) : null, vorige: herhaal ? (d.vorige || null) : null,
   };
+  // gesleepte volgorde in het project bewaren, zolang de taak in hetzelfde project blijft
+  if (typeof d.pvolg === "number" && body.project && body.project === (d._projectVoor ?? d.project)) body.pvolg = d.pvolg;
   if (metAgenda && !body.datum){ toast("Kies eerst een datum, dan kan hij in je agenda."); $("#f-datum").focus(); return; }
   const id = s.id || maakId();
   closeSheet();
@@ -1374,7 +1382,7 @@ document.addEventListener("click", e => {
       const t = S.tasks.find(x => x.id === id); if (!t) return;
       if (!S.canWrite) return;
       if (t.soort === "boodschap"){ openSheet({type:"boodschap", id, data: Object.assign({}, t)}); break; }
-      openSheet({type:"task", id, data: Object.assign({}, t, {herhaalKey: herhaalKey(t.herhaal)})});
+      openSheet({type:"task", id, data: Object.assign({}, t, {herhaalKey: herhaalKey(t.herhaal), _projectVoor: t.project || ""})});
       break;
     }
     case "toggle": toggleTask(id, a.dataset.mode); break;
@@ -1502,15 +1510,19 @@ document.addEventListener("submit", e => {
 /* ---------- punten van een lijst verslepen ---------- */
 // Werkt met vinger en muis (pointer events). Het punt verhuist in de pagina zodra je voorbij het midden
 // van een ander punt komt; bij loslaten bewaren we de nieuwe volgorde in één keer.
+// Twee soorten: punten van een lijst (soort "lijst", één document) en taken in een project (soort "taak",
+// elke taak krijgt een volgnummer `pvolg`). Alleen rijen met data-item doen mee; een "+ Toevoegen"-knop
+// onderaan blijft staan waar hij staat.
 let sleep = null;
+const sleepRijen = lijst => [...lijst.children].filter(r => r.dataset.item);
 document.addEventListener("pointerdown", e => {
   const grip = e.target.closest(".grip");
   if (!grip || !S.canWrite || sleep) return;
-  const rij = grip.closest(".li-row"), lijst = rij && rij.parentElement;
+  const rij = grip.closest("[data-item]"), lijst = rij && rij.parentElement;
   if (!lijst) return;
   e.preventDefault();
   try { grip.setPointerCapture(e.pointerId); } catch(_){}
-  sleep = {rij, lijst, id: grip.dataset.id, pid: e.pointerId, voor: [...lijst.children].map(r => r.dataset.item)};
+  sleep = {rij, lijst, id: grip.dataset.id, soort: grip.dataset.soort || "lijst", pid: e.pointerId, voor: sleepRijen(lijst).map(r => r.dataset.item)};
   rij.classList.add("sleept");
   document.body.classList.add("slepen");
 });
@@ -1520,24 +1532,27 @@ document.addEventListener("pointermove", e => {
   const y = e.clientY;
   // bij de rand van het scherm meescrollen
   if (y < 90) window.scrollBy(0, -10); else if (y > innerHeight - 160) window.scrollBy(0, 10);
-  let doel = null;
-  for (const r of sleep.lijst.children){
-    if (r === sleep.rij) continue;
-    const b = r.getBoundingClientRect();
-    if (y < b.top + b.height / 2){ doel = r; break; }
-  }
-  if (doel !== sleep.rij.nextElementSibling) sleep.lijst.insertBefore(sleep.rij, doel);
+  const anderen = sleepRijen(sleep.lijst).filter(r => r !== sleep.rij);
+  let doel = anderen.find(r => { const b = r.getBoundingClientRect(); return y < b.top + b.height / 2; });
+  // voorbij de laatste: direct achter de laatste rij, dus vóór een eventuele toevoegknop
+  if (!doel) doel = anderen.length ? anderen[anderen.length - 1].nextElementSibling : null;
+  if (doel !== sleep.rij && doel !== sleep.rij.nextElementSibling) sleep.lijst.insertBefore(sleep.rij, doel);
 }, {passive: false});
 function stopSlepen(e){
   if (!sleep || (e && e.pointerId !== sleep.pid)) return;
-  const {rij, lijst, id, voor} = sleep;
+  const {rij, lijst, id, soort, voor} = sleep;
   sleep = null;
   rij.classList.remove("sleept");
   document.body.classList.remove("slepen");
-  const na = [...lijst.children].map(r => r.dataset.item);
+  const na = sleepRijen(lijst).map(r => r.dataset.item);
   if (na.join("|") === voor.join("|")){ render(); return; }
-  // nieuwe volgorde; punten die intussen door de ander zijn toegevoegd, komen achteraan
   // daarna altijd opnieuw tekenen: lukt bewaren niet, dan springt de lijst terug naar de echte volgorde
+  if (soort === "taak"){
+    const ops = na.map((tid, i) => ["tasks/" + tid, {pvolg: i + 1}, "update"]);
+    write(db => db.batch(ops)).then(() => render());
+    return;
+  }
+  // nieuwe volgorde; punten die intussen door de ander zijn toegevoegd, komen achteraan
   wijzigLijst(id, items => na.map(k => items.find(i => i.id === k)).filter(Boolean).concat(items.filter(i => !na.includes(i.id)))).then(() => render());
 }
 document.addEventListener("pointerup", stopSlepen);
