@@ -147,6 +147,9 @@ button.li-t{border:0;background:transparent;padding:4px 0;text-align:left;color:
 .over-kaart.tekort{background:var(--danger-soft);border-color:var(--danger)}
 .over-kaart.tekort span{color:var(--danger)}
 .price.plus{color:var(--teal)}
+.totals.drie{grid-template-columns:repeat(3,minmax(0,1fr))}
+.totals.drie .tot b{font-size:18px}
+.totals.drie .tot{padding:9px 10px}
 /* vegen: de regel schuift naar links; in de vrijgekomen ruimte (een schaduw) staat "Verwijderen" */
 .row.veeg{position:relative;touch-action:pan-y}
 .row.veegt{z-index:2;transform:translateX(var(--dx,0));background:var(--surface);box-shadow:var(--d,0) 0 0 var(--danger-soft)}
@@ -426,7 +429,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "23 okt 2026 · 15";
+const VERSIE = "23 okt 2026 · 16";
 
 (function(){
 "use strict";
@@ -1047,17 +1050,28 @@ function maandenEerder(s, n){
 const opzegDatum = l => !l.einde ? "" : l.opzeg ? maandenEerder(l.einde, l.opzeg) : l.einde;
 // binnen 60 dagen moet je iets beslissen: opzeggen of laten doorlopen
 const lastLetOp = l => { const d = opzegDatum(l); if (!d) return null; const n = dagenTot(d); return n <= 60 ? n : null; };
+// sparen staat in dezelfde lijst als de vaste lasten, met sparen: true; het telt apart
+const isSparen = l => l.sparen === true;
+function wieChip(wie){
+  const p = personById(wie);
+  return `<span class="who">${p ? `<span class="dot" style="background:${esc(p.kleur)}"></span>${esc(p.naam)}` : "Samen"}</span>`;
+}
 function lastRij(l, letop){
   const meta = [];
-  if (letop){
+  if (isSparen(l)){
+    meta.push(wieChip(lastVanWie(l)));
+    if (l.notitie) meta.push(`<span>${esc(l.notitie)}</span>`);
+  } else if (letop){
     const p = personById(lastVanWie(l));
     meta.push(`<span class="who">${p ? `<span class="dot" style="background:${esc(p.kleur)}"></span>${esc(p.naam)}` : "Gezamenlijk"}</span>`);
   } else if (l.soort) meta.push(`<span>${esc(l.soort)}</span>`);
-  if (l.aanbieder) meta.push(`<span>${esc(l.aanbieder)}</span>`);
-  if (letop){
-    const n = dagenTot(opzegDatum(l));
-    meta.push(`<span class="over">${n < 0 ? "Opzegdatum is voorbij" : n === 0 ? "Vandaag uiterlijk opzeggen" : `Nog ${n} ${n === 1 ? "dag" : "dagen"} om op te zeggen`}</span>`);
-  } else meta.push(`<span>${l.einde ? "Loopt tot " + esc(datumMetJaar(l.einde)) : "Loopt door"}</span>`);
+  if (!isSparen(l)){
+    if (l.aanbieder) meta.push(`<span>${esc(l.aanbieder)}</span>`);
+    if (letop){
+      const n = dagenTot(opzegDatum(l));
+      meta.push(`<span class="over">${n < 0 ? "Opzegdatum is voorbij" : n === 0 ? "Vandaag uiterlijk opzeggen" : `Nog ${n} ${n === 1 ? "dag" : "dagen"} om op te zeggen`}</span>`);
+    } else meta.push(`<span>${l.einde ? "Loopt tot " + esc(datumMetJaar(l.einde)) : "Loopt door"}</span>`);
+  }
   const per = (PERIODES.find(p => p[0] === l.periode) || PERIODES[0])[2];
   return `<div class="row${S.canWrite ? " veeg" : ""}" data-item="${esc(l.id)}" data-veeg="lasten">
     <button class="body" type="button" data-act="edit-last" data-id="${esc(l.id)}"><div class="ttl">${esc(l.naam)}</div><div class="meta">${meta.join("")}</div></button>
@@ -1073,12 +1087,25 @@ const lastVanWie = l => huisgenoten().some(p => p.id === l.wie) ? l.wie : "samen
 function geldPerPersoon(){
   const huis = huisgenoten(), n = huis.length || 1;
   const som = arr => arr.reduce((s, x) => s + perMaand(x), 0);
+  const lasten = S.lasten.filter(l => !isSparen(l)), sparen = S.lasten.filter(isSparen);
   const samenInk = som(S.inkomsten.filter(i => !huis.some(p => p.id === i.wie)));
-  const gezamenlijk = som(S.lasten.filter(l => lastVanWie(l) === "samen"));
-  const rij = huis.map(p => ({p, ink: som(S.inkomsten.filter(i => i.wie === p.id)) + samenInk / n, eigen: som(S.lasten.filter(l => l.wie === p.id))}));
+  const gezamenlijk = som(lasten.filter(l => lastVanWie(l) === "samen"));
+  const samenSparen = som(sparen.filter(l => lastVanWie(l) === "samen"));
+  const rij = huis.map(p => ({p,
+    ink: som(S.inkomsten.filter(i => i.wie === p.id)) + samenInk / n,
+    eigen: som(lasten.filter(l => l.wie === p.id)),
+    eigenSparen: som(sparen.filter(l => l.wie === p.id)),
+  }));
   const totInk = rij.reduce((s, r) => s + r.ink, 0);
   const naarInkomen = S.instellingen.verdeling === "inkomen" && totInk > 0;
-  rij.forEach(r => { r.deel = naarInkomen ? r.ink / totInk : 1 / n; r.aandeel = gezamenlijk * r.deel; r.over = r.ink - r.eigen - r.aandeel; });
+  // gezamenlijk sparen wordt op dezelfde manier verdeeld als de gezamenlijke lasten
+  rij.forEach(r => {
+    r.deel = naarInkomen ? r.ink / totInk : 1 / n;
+    r.aandeel = gezamenlijk * r.deel;
+    r.samenSpaarDeel = samenSparen * r.deel;
+    r.sparen = r.eigenSparen + r.samenSpaarDeel;
+    r.over = r.ink - r.eigen - r.aandeel - r.sparen;
+  });
   return {rij, gezamenlijk, naarInkomen};
 }
 function persoonKaarten(){
@@ -1095,13 +1122,15 @@ function persoonKaarten(){
       <div><span>Inkomen</span><span>${euro.format(r.ink)}</span></div>
       <div><span>Eigen lasten</span><span>− ${euro.format(r.eigen)}</span></div>
       <div><span>Gezamenlijk ${pct(r.deel)}</span><span>− ${euro.format(r.aandeel)}</span></div>
-      <div class="pgeld-over${r.over < 0 ? " tekort" : ""}"><span>${r.over < 0 ? "Tekort" : "Over"}</span><span>${euro.format(Math.abs(r.over))}</span></div>
-      ${r.aandeel ? `<small>Stort ${euro.format(r.aandeel)} per maand op de gezamenlijke rekening</small>` : ""}
+      ${r.sparen ? `<div><span>Sparen</span><span>− ${euro.format(r.sparen)}</span></div>` : ""}
+      <div class="pgeld-over${r.over < 0 ? " tekort" : ""}"><span>${r.over < 0 ? "Tekort" : "Vrij"}</span><span>${euro.format(Math.abs(r.over))}</span></div>
+      ${r.aandeel + r.samenSpaarDeel ? `<small>Stort ${euro.format(r.aandeel + r.samenSpaarDeel)} per maand op de gezamenlijke rekening${r.samenSpaarDeel ? " (lasten en sparen)" : ""}</small>` : ""}
     </div>`).join("")}</div>`;
   return h;
 }
 const inkomenPerMaand = () => S.inkomsten.reduce((s, i) => s + perMaand(i), 0);
-const lastenPerMaand = () => S.lasten.reduce((s, l) => s + perMaand(l), 0);
+const lastenPerMaand = () => S.lasten.filter(l => !isSparen(l)).reduce((s, l) => s + perMaand(l), 0);
+const sparenPerMaand = () => S.lasten.filter(isSparen).reduce((s, l) => s + perMaand(l), 0);
 function inkomenRij(i){
   const p = personById(i.wie);
   const wie = i.wie === "samen" ? "Samen" : p ? p.naam : "";
@@ -1113,47 +1142,49 @@ function inkomenRij(i){
   </div>`;
 }
 function viewLasten(){
-  const L = S.lasten, I = S.inkomsten;
-  const totaal = lastenPerMaand(), inkomen = inkomenPerMaand(), over = inkomen - totaal;
+  const L = S.lasten.filter(l => !isSparen(l)), SP = S.lasten.filter(isSparen), I = S.inkomsten;
+  const totaal = lastenPerMaand(), spaar = sparenPerMaand(), inkomen = inkomenPerMaand(), over = inkomen - totaal - spaar;
   let h = statusNote();
   h += `<div class="nav">
     <button class="icon-btn" type="button" data-act="tab" data-id="wie" aria-label="Terug naar Wie">${ICON_L}</button>
     <h2>Inkomen en vaste lasten</h2>
   </div>`;
-  h += `<div class="totals"><div class="tot"><span>Inkomen per maand</span><b>${euro.format(inkomen)}</b></div><div class="tot"><span>Vaste lasten per maand</span><b>${euro.format(totaal)}</b></div></div>`;
+  h += `<div class="totals drie"><div class="tot"><span>Inkomen</span><b>${euro.format(inkomen)}</b></div><div class="tot"><span>Vaste lasten</span><b>${euro.format(totaal)}</b></div><div class="tot"><span>Sparen</span><b>${euro.format(spaar)}</b></div></div>`;
   if (I.length) h += `<div class="over-kaart${over < 0 ? " tekort" : ""}">
-      <span>${over < 0 ? "Tekort per maand" : "Over per maand"}</span><b>${euro.format(Math.abs(over))}</b>
-      <small>${over < 0 ? "Er gaat meer uit dan er binnenkomt" : `Dat is ${euro.format(over * 12)} per jaar, voor boodschappen, sparen en de rest`}</small>
+      <span>${over < 0 ? "Tekort per maand" : "Vrij te besteden per maand"}</span><b>${euro.format(Math.abs(over))}</b>
+      <small>${over < 0 ? "Er gaat meer uit dan er binnenkomt" : `Na vaste lasten${spaar ? " en sparen" : ""}: voor boodschappen, uitjes en de rest`}</small>
     </div>`;
-  if (I.length || L.length) h += persoonKaarten();
+  if (I.length || S.lasten.length) h += persoonKaarten();
   const letop = L.filter(l => lastLetOp(l) !== null).sort((a,b) => opzegDatum(a).localeCompare(opzegDatum(b)));
   if (letop.length) h += secHtml("Let op: opzeggen of verlengen", letop.length, `<div class="list">${letop.map(l => lastRij(l, true)).join("")}</div>`, "late");
   // inkomen: per persoon, gesorteerd op de volgorde van de personen
   const pIndex = id => { const i = S.people.findIndex(p => p.id === id); return i < 0 ? 99 : i; };
   const ink = I.slice().sort((a,b) => pIndex(a.wie) - pIndex(b.wie) || String(a.naam).localeCompare(String(b.naam), "nl"));
   h += secHtml("Inkomen", I.length ? euro.format(inkomen) + " /mnd" : "", `<div class="list">${ink.length ? ink.map(inkomenRij).join("") : `<div class="empty"><b>Nog geen inkomen ingevuld</b>Vul per persoon het netto salaris in, dan zie je wat jullie per maand overhouden.</div>`}${S.canWrite ? `<button class="add-inline" type="button" data-act="new-inkomen">+ Inkomen toevoegen</button>` : ""}</div>`);
+  const sorteerLasten = arr => arr.sort((a,b) => perMaand(b) - perMaand(a) || String(a.naam).localeCompare(String(b.naam), "nl"));
   if (!L.length){
     h += secHtml("Vaste lasten", "", `<div class="list"><div class="empty"><b>Nog geen vaste lasten</b>Zet hier energie, internet, verzekeringen en abonnementen, met het bedrag en tot wanneer het contract loopt.</div>${S.canWrite ? `<button class="add-inline" type="button" data-act="new-last">+ Toevoegen</button>` : ""}</div>`);
-    return h;
+  } else {
+    // blokken: gezamenlijk, daarna per persoon; binnen een blok van hoog naar laag (omgerekend per maand)
+    const blokken = [["samen", "Gezamenlijke lasten", L.filter(l => lastVanWie(l) === "samen")]]
+      .concat(huisgenoten().map(p => [p.id, "Lasten van " + p.naam, L.filter(l => lastVanWie(l) === p.id)]));
+    for (const [wie, kop, its] of blokken){
+      if (!its.length && wie === "samen") continue;
+      const sub = its.reduce((x, l) => x + perMaand(l), 0);
+      h += secHtml(kop, its.length ? euro.format(sub) + " /mnd" : "", `<div class="list">${sorteerLasten(its).map(l => lastRij(l)).join("")}${S.canWrite ? `<button class="add-inline" type="button" data-act="new-last" data-id="${esc(wie)}">+ Toevoegen</button>` : ""}</div>`);
+    }
   }
-  // blokken: gezamenlijk, daarna per persoon; binnen een blok van hoog naar laag (omgerekend per maand)
-  const sorteerLasten = arr => arr.sort((a,b) => perMaand(b) - perMaand(a) || String(a.naam).localeCompare(String(b.naam), "nl"));
-  const blokken = [["samen", "Gezamenlijke lasten", L.filter(l => lastVanWie(l) === "samen")]]
-    .concat(huisgenoten().map(p => [p.id, "Lasten van " + p.naam, L.filter(l => lastVanWie(l) === p.id)]));
-  for (const [wie, kop, its] of blokken){
-    if (!its.length && wie === "samen" && L.length) continue;
-    const sub = its.reduce((x, l) => x + perMaand(l), 0);
-    h += secHtml(kop, its.length ? euro.format(sub) + " /mnd" : "", `<div class="list">${sorteerLasten(its).map(l => lastRij(l)).join("")}${S.canWrite ? `<button class="add-inline" type="button" data-act="new-last" data-id="${esc(wie)}">+ Toevoegen</button>` : ""}</div>`);
-  }
+  // sparen: één blok, met per regel van wie
+  h += secHtml("Sparen", SP.length ? euro.format(spaar) + " /mnd" : "", `<div class="list">${SP.length ? sorteerLasten(SP).map(l => lastRij(l)).join("") : `<div class="empty"><b>Nog niets voor sparen</b>Zet hier wat jullie per maand opzij zetten, samen of ieder voor zich.</div>`}${S.canWrite ? `<button class="add-inline" type="button" data-act="new-sparen">+ Sparen toevoegen</button>` : ""}</div>`);
   h += `<p class="hint" style="margin-top:12px">Alles is omgerekend naar een bedrag per maand. Salaris per 4 weken telt 13 keer per jaar; een bedrag per jaar, zoals vakantiegeld, is over 12 maanden verdeeld.</p>`;
   return h;
 }
 function lastenKaart(){
-  const L = S.lasten, I = S.inkomsten;
-  const totaal = lastenPerMaand(), over = inkomenPerMaand() - totaal;
+  const L = S.lasten.filter(l => !isSparen(l)), I = S.inkomsten;
+  const totaal = lastenPerMaand(), over = inkomenPerMaand() - totaal - sparenPerMaand();
   const letop = L.filter(l => lastLetOp(l) !== null).length;
   const regel = I.length
-    ? `${over < 0 ? "Tekort" : "Over"}: ${euro.format(Math.abs(over))} per maand · vaste lasten ${euro.format(totaal)}`
+    ? `${over < 0 ? "Tekort" : "Vrij te besteden"}: ${euro.format(Math.abs(over))} per maand · vaste lasten ${euro.format(totaal)}`
     : L.length ? `${euro.format(totaal)} per maand · ${L.length} ${L.length === 1 ? "contract" : "contracten"}` : "Nog niets ingevuld";
   return `<div class="lasten-kaart" role="button" tabindex="0" data-act="naar-lasten">
     <div><b>Inkomen en vaste lasten</b><span>${regel}</span>
@@ -1351,24 +1382,31 @@ function renderSheet(){
   } else if (s.type === "last"){
     const l = s.data;
     const bedrag = l.bedragTekst != null ? l.bedragTekst : typeof l.bedrag === "number" ? String(l.bedrag).replace(".", ",") : "";
-    inner = `<h2>${s.id ? "Contract wijzigen" : "Vaste last toevoegen"}</h2>
+    const sp = l.sparenKeuze ? l.sparenKeuze === "sparen" : isSparen(l);
+    inner = `<h2>${sp ? (s.id ? "Sparen wijzigen" : "Sparen toevoegen") : (s.id ? "Contract wijzigen" : "Vaste last toevoegen")}</h2>
     <form class="form" id="lastForm" autocomplete="off">
-      <div class="fld"><label for="vl-naam">Wat</label><input id="vl-naam" required maxlength="80" value="${esc(l.naam||"")}" placeholder="Bijv. Energie"></div>
-      <div class="fld"><label for="vl-aanb">Aanbieder</label><input id="vl-aanb" maxlength="60" value="${esc(l.aanbieder||"")}" placeholder="Bijv. Vattenfall"></div>
-      <div class="fld"><span class="lab">Van wie</span><div class="pick" role="group">${[["samen", "Gezamenlijk", ""]].concat(huisgenoten().map(p => [p.id, p.naam, p.kleur])).map(([v,lbl,k]) => `<button type="button" data-pick="wie" data-v="${esc(v)}" aria-pressed="${lastVanWie(l)===v}">${k ? `<span class="dot" style="background:${esc(k)}"></span>` : ""}${esc(lbl)}</button>`).join("")}</div></div>
-      <div class="fld"><span class="lab">Soort</span><div class="pick" role="group">${LAST_SOORTEN.map(v => `<button type="button" data-pick="soort" data-v="${esc(v)}" aria-pressed="${(l.soort||"")===v}">${esc(v)}</button>`).join("")}</div></div>
+      <div class="seg" role="group" aria-label="Soort" style="margin-top:0">
+        <button type="button" data-pick="sparenKeuze" data-v="last" aria-pressed="${!sp}">Vaste last</button>
+        <button type="button" data-pick="sparenKeuze" data-v="sparen" aria-pressed="${sp}">Sparen</button>
+      </div>
+      <div class="fld"><label for="vl-naam">Wat</label><input id="vl-naam" required maxlength="80" value="${esc(l.naam||"")}" placeholder="${sp ? "Bijv. Buffer, Vakantie, Bruiloft" : "Bijv. Energie"}"></div>
+      <div class="fld" ${sp ? "hidden" : ""}><label for="vl-aanb">Aanbieder</label><input id="vl-aanb" maxlength="60" value="${esc(l.aanbieder||"")}" placeholder="Bijv. Vattenfall"></div>
+      <div class="fld"><span class="lab">Van wie</span><div class="pick" role="group">${[["samen", sp ? "Samen" : "Gezamenlijk", ""]].concat(huisgenoten().map(p => [p.id, p.naam, p.kleur])).map(([v,lbl,k]) => `<button type="button" data-pick="wie" data-v="${esc(v)}" aria-pressed="${lastVanWie(l)===v}">${k ? `<span class="dot" style="background:${esc(k)}"></span>` : ""}${esc(lbl)}</button>`).join("")}</div></div>
+      <div class="fld" ${sp ? "hidden" : ""}><span class="lab">Soort</span><div class="pick" role="group">${LAST_SOORTEN.map(v => `<button type="button" data-pick="soort" data-v="${esc(v)}" aria-pressed="${(l.soort||"")===v}">${esc(v)}</button>`).join("")}</div></div>
       <div class="two">
         <div class="fld"><label for="vl-bedrag">Bedrag (€)</label><input id="vl-bedrag" inputmode="decimal" value="${esc(bedrag)}" placeholder="0,00"></div>
         <div class="fld"><span class="lab">Per</span><div class="pick" role="group">${LAST_PERIODES.map(([v, lbl]) => `<button type="button" data-pick="periode" data-v="${v}" aria-pressed="${(l.periode||"maand")===v}">${lbl}</button>`).join("")}</div></div>
       </div>
-      <div class="two">
-        <div class="fld"><label for="vl-einde">Contract loopt tot</label><input id="vl-einde" type="date" value="${esc(l.einde||"")}"></div>
-        <div class="fld"><label for="vl-opzeg">Opzegtermijn</label><select id="vl-opzeg">${[0,1,2,3,6].map(n => `<option value="${n}" ${Number(l.opzeg||0)===n ? "selected" : ""}>${n ? n + (n === 1 ? " maand" : " maanden") : "Geen"}</option>`).join("")}</select></div>
+      <div ${sp ? "hidden" : ""} class="form" style="gap:12px">
+        <div class="two">
+          <div class="fld"><label for="vl-einde">Contract loopt tot</label><input id="vl-einde" type="date" value="${esc(l.einde||"")}"></div>
+          <div class="fld"><label for="vl-opzeg">Opzegtermijn</label><select id="vl-opzeg">${[0,1,2,3,6].map(n => `<option value="${n}" ${Number(l.opzeg||0)===n ? "selected" : ""}>${n ? n + (n === 1 ? " maand" : " maanden") : "Geen"}</option>`).join("")}</select></div>
+        </div>
+        <p class="hint">Laat "loopt tot" leeg bij een contract dat gewoon doorloopt. Met een einddatum waarschuwt de app twee maanden voor de opzegdatum.</p>
+        <div class="fld"><label for="vl-nr">Klant- of contractnummer</label><input id="vl-nr" maxlength="60" value="${esc(l.nummer||"")}"></div>
       </div>
-      <p class="hint">Laat "loopt tot" leeg bij een contract dat gewoon doorloopt. Met een einddatum waarschuwt de app twee maanden voor de opzegdatum.</p>
-      <div class="fld"><label for="vl-nr">Klant- of contractnummer</label><input id="vl-nr" maxlength="60" value="${esc(l.nummer||"")}"></div>
-      <div class="fld"><label for="vl-notitie">Notitie</label><textarea id="vl-notitie" maxlength="1000" placeholder="Telefoonnummer klantenservice, bijzonderheden…">${esc(l.notitie||"")}</textarea></div>
-      ${s.id && l.einde ? `<button type="button" class="btn agenda-btn" data-act="last-taak">${ICON_CHECK} Maak een taak om op te zeggen of te verlengen</button>` : ""}
+      <div class="fld"><label for="vl-notitie">Notitie</label><textarea id="vl-notitie" maxlength="1000" placeholder="${sp ? "Bijv. naar de spaarrekening bij de bank" : "Telefoonnummer klantenservice, bijzonderheden…"}">${esc(l.notitie||"")}</textarea></div>
+      ${s.id && l.einde && !sp ? `<button type="button" class="btn agenda-btn" data-act="last-taak">${ICON_CHECK} Maak een taak om op te zeggen of te verlengen</button>` : ""}
       <div class="actions">
         ${s.id ? `<button type="button" class="btn danger${s.armed ? " armed" : ""}" data-act="delete-last">${s.armed ? "Echt verwijderen" : "Verwijderen"}</button>` : ""}
         <div class="right"><button type="button" class="btn" data-act="close">Annuleer</button><button type="submit" class="btn primary">Bewaar</button></div>
@@ -1682,9 +1720,12 @@ async function saveLast(){
   let bedrag = null;
   const bt = (d.bedragTekst||"").trim();
   if (bt){ const n = parseFloat(bt.replace(/\./g,"").replace(",", ".").replace(/[^\d.\-]/g,"")); if (isFinite(n)) bedrag = Math.round(n*100)/100; }
+  const sp = d.sparenKeuze ? d.sparenKeuze === "sparen" : isSparen(d);
   const body = {
-    naam, aanbieder: (d.aanbieder||"").trim(), soort: d.soort || "Overig", wie: lastVanWie(d), bedrag, periode: d.periode || "maand",
-    einde: d.einde || "", opzeg: Number(d.opzeg) || 0, nummer: (d.nummer||"").trim(), notitie: (d.notitie||"").trim(),
+    naam, aanbieder: sp ? "" : (d.aanbieder||"").trim(), soort: sp ? "Sparen" : (d.soort && d.soort !== "Sparen" ? d.soort : "Overig"),
+    wie: lastVanWie(d), bedrag, periode: d.periode || "maand", sparen: sp,
+    // sparen heeft geen contract: geen einddatum, dus ook geen opzegwaarschuwing
+    einde: sp ? "" : (d.einde || ""), opzeg: sp ? 0 : (Number(d.opzeg) || 0), nummer: sp ? "" : (d.nummer||"").trim(), notitie: (d.notitie||"").trim(),
     gemaaktOp: d.gemaaktOp || new Date().toISOString(),
   };
   const id = s.id || maakId();
@@ -1900,7 +1941,8 @@ document.addEventListener("click", e => {
       write(db => db.doc("inkomsten/" + iid).delete(), "Verwijderd");
       break;
     }
-    case "new-last": openSheet({type:"last", data:{wie: id || "samen", periode: "maand"}}); break;
+    case "new-last": openSheet({type:"last", data:{wie: id || "samen", periode: "maand", sparenKeuze: "last"}}); break;
+    case "new-sparen": openSheet({type:"last", data:{wie: "samen", periode: "maand", sparenKeuze: "sparen"}}); break;
     case "verdeling": {
       if (S.instellingen.verdeling === id || (!S.instellingen.verdeling && id === "gelijk")) break;
       write(db => db.doc("instellingen/algemeen").set(Object.assign({}, S.instellingen, {verdeling: id})));
@@ -2224,6 +2266,7 @@ function luisteren(){
     }, onErr),
     db.collection("lasten").onSnapshot(snap => {
       S.lasten = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
+      if (!snap.fromCache) zetSparenOver();
       render();
     }, onErr),
     db.collection("notities").onSnapshot(snap => {
@@ -2250,6 +2293,17 @@ function stoppen(){
 // mogen dit tegelijk doen: het resultaat is hetzelfde.
 const vers = {tasks: false, projecten: false, inst: false};
 let migratieBezig = false;
+// Eenmalig: wat als vaste last is ingevoerd maar "spaar" in de naam heeft, verhuist naar het blok Sparen.
+// Alleen regels die nog nooit als sparen of last zijn bewaard (zonder veld `sparen`), dus nieuwe keuzes blijven staan.
+let sparenOverBezig = false;
+async function zetSparenOver(){
+  if (sparenOverBezig || !S.user) return;
+  const kandidaten = S.lasten.filter(l => l.sparen === undefined && /spaar|sparen/i.test(l.naam || ""));
+  if (!kandidaten.length) return;
+  sparenOverBezig = true;
+  try { await S.db.batch(kandidaten.map(l => ["lasten/" + l.id, {sparen: true, soort: "Sparen", einde: "", opzeg: 0}, "update"])); } catch(_){}
+  sparenOverBezig = false;
+}
 async function migreerProjecten(){
   if (migratieBezig || !S.user || !vers.tasks || !vers.projecten || !vers.inst || S.instellingen.projectenV1) return;
   migratieBezig = true;
