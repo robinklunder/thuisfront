@@ -122,6 +122,29 @@ button.li-t{border:0;background:transparent;padding:4px 0;text-align:left;color:
 .tabs button{min-width:0}
 @media (max-width:380px){.tabs button{font-size:10px}}
 
+/* vaste lasten */
+.lasten-kaart{display:flex;align-items:center;gap:12px;margin-top:14px;background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--teal);border-radius:14px;padding:12px 14px;cursor:pointer}
+.lasten-kaart > div{flex:1;min-width:0;display:grid;gap:2px}
+.lasten-kaart b{font-family:var(--f-display);font-size:16.5px}
+.lasten-kaart span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lasten-kaart span.over{color:var(--danger);font-weight:600}
+.lasten-kaart svg{width:18px;height:18px;color:var(--muted);flex:0 0 auto}
+.price small{font-weight:500;color:var(--muted);font-size:11.5px;margin-left:2px}
+.sec-h.late .n{color:var(--danger)}
+
+/* zoeken */
+.zoek-btn{width:36px;height:36px}
+.zoek-btn svg{width:18px;height:18px}
+#zoek-q{font-size:16px}
+#zoek-res{display:grid;gap:14px;min-height:120px}
+.zoek-g{display:grid;gap:6px}
+.zoek-g h3{margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.zoek-r{display:grid;gap:2px;text-align:left;border:1px solid var(--line);background:var(--surface-2);border-radius:10px;padding:9px 12px;cursor:pointer}
+.zoek-r b{font-weight:600;overflow-wrap:anywhere}
+.zoek-r span{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.zoek-r mark{background:var(--accent-soft);color:inherit;border-radius:3px;padding:0 1px}
+.notitie.gevonden{box-shadow:0 0 0 3px var(--accent);transition:box-shadow .3s}
+
 /* agenda */
 .agenda-btn{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--accent);padding:11px 12px}
 .agenda-btn svg{width:18px;height:18px}
@@ -315,6 +338,7 @@ button{cursor:pointer}
       <h1>Het Thuisfront</h1>
       <a id="adresLink" href="#" target="_blank" rel="noopener" hidden></a>
     </div>
+    <button class="icon-btn zoek-btn" id="zoekBtn" type="button" data-act="zoek" aria-label="Zoeken"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></button>
     <button class="me" id="meBtn" type="button" data-act="who-am-i"></button>
   </header>
   <main id="view"></main>
@@ -353,7 +377,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "23 okt 2026 · 10";
+const VERSIE = "23 okt 2026 · 11";
 
 (function(){
 "use strict";
@@ -484,6 +508,7 @@ const S = {
   dag: vandaag(),
   toonKlaar: false, toastActie: null,
   projecten: [], notities: [], project: null, projTab: "taken",
+  lasten: [],
   week: iso(monday(new Date())),
   filter: lsGet("filter") || "alle",
   takenStatus: "open",
@@ -895,8 +920,106 @@ function notitieKaart(n){
   </div>`;
 }
 
+/* ---------- vaste lasten en contracten ---------- */
+const LAST_SOORTEN = ["Wonen", "Energie", "Water", "Internet & tv", "Telefoon", "Verzekering", "Abonnement", "Overig"];
+const PERIODES = [["maand", "Maand", "/mnd", 1], ["kwartaal", "Kwartaal", "/kw", 3], ["jaar", "Jaar", "/jr", 12]];
+const perMaand = l => typeof l.bedrag === "number" ? l.bedrag / ((PERIODES.find(p => p[0] === l.periode) || PERIODES[0])[3]) : 0;
+const datumMetJaar = s => parse(s).toLocaleDateString("nl-NL", {day: "numeric", month: "short", year: "numeric"});
+// n maanden eerder, met de dag zo nodig ingekort (31 maart min 1 maand = 28/29 februari)
+function maandenEerder(s, n){
+  const d = parse(s), x = new Date(d.getFullYear(), d.getMonth() - n, 1);
+  x.setDate(Math.min(d.getDate(), new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()));
+  return iso(x);
+}
+// uiterlijke opzegdatum: einddatum min de opzegtermijn
+const opzegDatum = l => !l.einde ? "" : l.opzeg ? maandenEerder(l.einde, l.opzeg) : l.einde;
+// binnen 60 dagen moet je iets beslissen: opzeggen of laten doorlopen
+const lastLetOp = l => { const d = opzegDatum(l); if (!d) return null; const n = dagenTot(d); return n <= 60 ? n : null; };
+function lastRij(l, letop){
+  const meta = [];
+  if (l.aanbieder) meta.push(`<span>${esc(l.aanbieder)}</span>`);
+  if (letop){
+    const n = dagenTot(opzegDatum(l));
+    meta.push(`<span class="over">${n < 0 ? "Opzegdatum is voorbij" : n === 0 ? "Vandaag uiterlijk opzeggen" : `Nog ${n} ${n === 1 ? "dag" : "dagen"} om op te zeggen`}</span>`);
+  } else meta.push(`<span>${l.einde ? "Loopt tot " + esc(datumMetJaar(l.einde)) : "Loopt door"}</span>`);
+  const per = (PERIODES.find(p => p[0] === l.periode) || PERIODES[0])[2];
+  return `<div class="row" data-item="${esc(l.id)}">
+    <button class="body" type="button" data-act="edit-last" data-id="${esc(l.id)}"><div class="ttl">${esc(l.naam)}</div><div class="meta">${meta.join("")}</div></button>
+    ${typeof l.bedrag === "number" ? `<span class="price">${euro.format(l.bedrag)}<small>${per}</small></span>` : ""}
+  </div>`;
+}
+function viewLasten(){
+  const L = S.lasten;
+  const totaal = L.reduce((s, l) => s + perMaand(l), 0);
+  let h = statusNote();
+  h += `<div class="nav">
+    <button class="icon-btn" type="button" data-act="tab" data-id="wie" aria-label="Terug naar Wie">${ICON_L}</button>
+    <h2>Vaste lasten</h2>
+  </div>`;
+  h += `<div class="totals"><div class="tot"><span>Per maand</span><b>${euro.format(totaal)}</b></div><div class="tot"><span>Per jaar</span><b>${euro.format(totaal * 12)}</b></div></div>`;
+  const letop = L.filter(l => lastLetOp(l) !== null).sort((a,b) => opzegDatum(a).localeCompare(opzegDatum(b)));
+  if (letop.length) h += secHtml("Let op: opzeggen of verlengen", letop.length, `<div class="list">${letop.map(l => lastRij(l, true)).join("")}</div>`, "late");
+  if (!L.length){
+    h += `<div class="sec"><div class="list"><div class="empty"><b>Nog geen vaste lasten</b>Zet hier energie, internet, verzekeringen en abonnementen, met het bedrag en tot wanneer het contract loopt.</div>${S.canWrite ? `<button class="add-inline" type="button" data-act="new-last">+ Toevoegen</button>` : ""}</div></div>`;
+    return h;
+  }
+  const rang = s => { const i = LAST_SOORTEN.indexOf(s); return i < 0 ? 99 : i; };
+  const soorten = [...new Set(L.map(l => l.soort || "Overig"))].sort((a,b) => rang(a) - rang(b));
+  for (const s of soorten){
+    const its = L.filter(l => (l.soort || "Overig") === s).sort((a,b) => String(a.naam).localeCompare(String(b.naam), "nl"));
+    const sub = its.reduce((x, l) => x + perMaand(l), 0);
+    h += secHtml(s, euro.format(sub) + " /mnd", `<div class="list">${its.map(l => lastRij(l)).join("")}${S.canWrite ? `<button class="add-inline" type="button" data-act="new-last" data-id="${esc(s)}">+ Toevoegen</button>` : ""}</div>`);
+  }
+  h += `<p class="hint" style="margin-top:12px">Bedragen per kwartaal of per jaar zijn omgerekend naar een bedrag per maand.</p>`;
+  return h;
+}
+function lastenKaart(){
+  const L = S.lasten;
+  const totaal = L.reduce((s, l) => s + perMaand(l), 0);
+  const letop = L.filter(l => lastLetOp(l) !== null).length;
+  return `<div class="lasten-kaart" role="button" tabindex="0" data-act="naar-lasten">
+    <div><b>Vaste lasten en contracten</b><span>${L.length ? `${euro.format(totaal)} per maand · ${L.length} ${L.length === 1 ? "contract" : "contracten"}` : "Nog niets ingevuld"}</span>
+    ${letop ? `<span class="over">${letop} ${letop === 1 ? "contract moet" : "contracten moeten"} binnenkort opgezegd of verlengd</span>` : ""}</div>
+    ${ICON_R}
+  </div>`;
+}
+
+/* ---------- zoeken ---------- */
+const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+function markeer(tekst, q){
+  const t = String(tekst || ""), i = norm(t).indexOf(q);
+  if (!q || i < 0) return esc(t);
+  return esc(t.slice(0, i)) + "<mark>" + esc(t.slice(i, i + q.length)) + "</mark>" + esc(t.slice(i + q.length));
+}
+function zoekHtml(invoer){
+  const q = norm((invoer || "").trim());
+  if (q.length < 2) return `<p class="hint">Typ minstens twee letters. Je zoekt in taken, boodschappen, projecten, ideeën, lijsten en vaste lasten.</p>`;
+  const past = (...v) => v.some(x => norm(x).includes(q));
+  const regel = (soort, id, titel, sub) => `<button class="zoek-r" type="button" data-act="zoek-ga" data-soort="${soort}" data-id="${esc(id)}"><b>${markeer(titel, q)}</b>${sub ? `<span>${sub}</span>` : ""}</button>`;
+  const groepen = [];
+  const voeg = (kop, items) => { if (items.length) groepen.push(`<div class="zoek-g"><h3>${esc(kop)}</h3>${items.slice(0, 15).join("")}${items.length > 15 ? `<p class="hint">en nog ${items.length - 15}…</p>` : ""}</div>`); };
+  voeg("Taken", S.tasks.filter(t => t.soort !== "boodschap" && past(t.titel, t.notitie, t.categorie)).map(t => {
+    const p = personById(t.wie), sub = [t.wie === "samen" ? "Samen" : p ? p.naam : "", t.datum ? fmtKort(t.datum) : "", t.klaar ? "klaar" : ""].filter(Boolean).map(esc).join(" · ");
+    return regel("taak", t.id, t.titel, sub);
+  }));
+  voeg("Boodschappen", S.tasks.filter(t => t.soort === "boodschap" && past(t.titel, t.notitie)).map(t => {
+    const w = S.winkels.find(x => x.id === t.winkel);
+    return regel("boodschap", t.id, t.titel, esc([w ? w.naam : "", t.klaar ? "in het mandje" : ""].filter(Boolean).join(" · ")));
+  }));
+  voeg("Projecten", S.projecten.filter(p => past(p.naam, p.omschrijving)).map(p => regel("project", p.id, p.naam, p.status === "afgerond" ? "Afgerond" : "")));
+  voeg("Ideeën en lijsten", S.notities.filter(n => past(n.titel, n.tekst, ...(n.items || []).map(i => i.tekst))).map(n => {
+    const p = projectById(n.project);
+    const hit = !past(n.titel, n.tekst) ? (n.items || []).find(i => norm(i.tekst).includes(q)) : null;
+    return regel("notitie", n.id, n.titel, [esc((n.soort === "lijst" ? "Lijst" : "Idee") + (p ? " · " + p.naam : "")), hit ? "punt: " + markeer(hit.tekst, q) : ""].filter(Boolean).join(" · "));
+  }));
+  voeg("Vaste lasten", S.lasten.filter(l => past(l.naam, l.aanbieder, l.nummer, l.notitie, l.soort)).map(l =>
+    regel("last", l.id, l.naam, esc([l.aanbieder, typeof l.bedrag === "number" ? euro.format(l.bedrag) + (PERIODES.find(p => p[0] === l.periode) || PERIODES[0])[2] : ""].filter(Boolean).join(" · ")))));
+  return groepen.length ? groepen.join("") : `<p class="hint">Niets gevonden voor "${esc(invoer.trim())}".</p>`;
+}
+
 function viewWie(){
   let h = statusNote();
+  if (S.user) h += lastenKaart();
   h += `<div class="sec-h" style="margin-top:14px"><h3>Personen</h3>${S.canWrite ? `<button class="btn sm" type="button" data-act="new-person">+ Persoon</button>` : ""}</div>`;
   if (!S.people.length){
     h += `<div class="list"><div class="empty"><b>Nog niemand toegevoegd</b>Voeg jezelf en je huisgenoten toe om taken te verdelen.</div></div>`;
@@ -947,7 +1070,7 @@ function instellingenHtml(){
 function render(){
   // tijdens het slepen niet opnieuw tekenen (bijv. door een wijziging van de ander), anders valt het punt uit je vinger
   if (sleep) return;
-  const views = {dag:viewDag, week:viewWeek, taken:viewTaken, projecten:viewProjecten, kopen:viewKopen, wie:viewWie};
+  const views = {dag:viewDag, week:viewWeek, taken:viewTaken, projecten:viewProjecten, kopen:viewKopen, wie:viewWie, lasten:viewLasten};
   if (!views[S.view]) S.view = "dag";
   const main = $("#view");
   // een live update mag het veld waarin je aan het typen bent niet wegvegen
@@ -957,7 +1080,8 @@ function render(){
   main.innerHTML = views[S.view]();
   if (focusId){ const el = document.getElementById(focusId); if (el){ el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); } }
   document.querySelectorAll("#tabs button").forEach(b => {
-    if (b.dataset.tab === S.view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+    // de pagina Vaste lasten hoort bij Wie
+    if (b.dataset.tab === (S.view === "lasten" ? "wie" : S.view)) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
   $("#fab").hidden = !S.canWrite || S.view === "wie";
   const ik = personById(S.ik);
@@ -1045,6 +1169,37 @@ function renderSheet(){
         <div class="right"><button type="button" class="btn" data-act="close">Annuleer</button><button type="submit" class="btn primary">Bewaar</button></div>
       </div>
     </form>`;
+  } else if (s.type === "last"){
+    const l = s.data;
+    const bedrag = l.bedragTekst != null ? l.bedragTekst : typeof l.bedrag === "number" ? String(l.bedrag).replace(".", ",") : "";
+    inner = `<h2>${s.id ? "Contract wijzigen" : "Vaste last toevoegen"}</h2>
+    <form class="form" id="lastForm" autocomplete="off">
+      <div class="fld"><label for="vl-naam">Wat</label><input id="vl-naam" required maxlength="80" value="${esc(l.naam||"")}" placeholder="Bijv. Energie"></div>
+      <div class="fld"><label for="vl-aanb">Aanbieder</label><input id="vl-aanb" maxlength="60" value="${esc(l.aanbieder||"")}" placeholder="Bijv. Vattenfall"></div>
+      <div class="fld"><span class="lab">Soort</span><div class="pick" role="group">${LAST_SOORTEN.map(v => `<button type="button" data-pick="soort" data-v="${esc(v)}" aria-pressed="${(l.soort||"")===v}">${esc(v)}</button>`).join("")}</div></div>
+      <div class="two">
+        <div class="fld"><label for="vl-bedrag">Bedrag (€)</label><input id="vl-bedrag" inputmode="decimal" value="${esc(bedrag)}" placeholder="0,00"></div>
+        <div class="fld"><span class="lab">Per</span><div class="pick" role="group">${PERIODES.map(([v, lbl]) => `<button type="button" data-pick="periode" data-v="${v}" aria-pressed="${(l.periode||"maand")===v}">${lbl}</button>`).join("")}</div></div>
+      </div>
+      <div class="two">
+        <div class="fld"><label for="vl-einde">Contract loopt tot</label><input id="vl-einde" type="date" value="${esc(l.einde||"")}"></div>
+        <div class="fld"><label for="vl-opzeg">Opzegtermijn</label><select id="vl-opzeg">${[0,1,2,3,6].map(n => `<option value="${n}" ${Number(l.opzeg||0)===n ? "selected" : ""}>${n ? n + (n === 1 ? " maand" : " maanden") : "Geen"}</option>`).join("")}</select></div>
+      </div>
+      <p class="hint">Laat "loopt tot" leeg bij een contract dat gewoon doorloopt. Met een einddatum waarschuwt de app twee maanden voor de opzegdatum.</p>
+      <div class="fld"><label for="vl-nr">Klant- of contractnummer</label><input id="vl-nr" maxlength="60" value="${esc(l.nummer||"")}"></div>
+      <div class="fld"><label for="vl-notitie">Notitie</label><textarea id="vl-notitie" maxlength="1000" placeholder="Telefoonnummer klantenservice, bijzonderheden…">${esc(l.notitie||"")}</textarea></div>
+      ${s.id && l.einde ? `<button type="button" class="btn agenda-btn" data-act="last-taak">${ICON_CHECK} Maak een taak om op te zeggen of te verlengen</button>` : ""}
+      <div class="actions">
+        ${s.id ? `<button type="button" class="btn danger${s.armed ? " armed" : ""}" data-act="delete-last">${s.armed ? "Echt verwijderen" : "Verwijderen"}</button>` : ""}
+        <div class="right"><button type="button" class="btn" data-act="close">Annuleer</button><button type="submit" class="btn primary">Bewaar</button></div>
+      </div>
+    </form>`;
+  } else if (s.type === "zoek"){
+    inner = `<h2>Zoeken</h2>
+    <div class="form">
+      <div class="fld"><input id="zoek-q" type="search" enterkeyhint="search" autocomplete="off" placeholder="Zoek in alles…" aria-label="Zoekterm" value="${esc(s.data.q||"")}"></div>
+      <div id="zoek-res">${zoekHtml(s.data.q||"")}</div>
+    </div>`;
   } else if (s.type === "lijstpunt"){
     inner = `<h2>Punt wijzigen</h2>
     <form class="form" id="lijstpuntForm" autocomplete="off">
@@ -1104,8 +1259,11 @@ function renderSheet(){
     <div class="pick">${S.people.map(p => `<button type="button" data-act="set-ik" data-id="${esc(p.id)}" aria-pressed="${S.ik===p.id}"><span class="dot" style="background:${esc(p.kleur)}"></span>${esc(p.naam)}</button>`).join("")}</div>
     <div class="actions"><div class="right"><button type="button" class="btn" data-act="close">Sluit</button></div></div>`;
   }
+  // het veld waarin je typt houdt de focus, ook als het venster opnieuw wordt getekend
+  const actief = document.activeElement, actiefId = actief && actief.id && $("#sheetHost").contains(actief) ? actief.id : null;
   $("#sheetHost").innerHTML = `<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div></div>`;
-  const first = $("#f-titel") || $("#b-titel") || $("#w-naam") || $("#p-naam") || $("#pr-naam") || $("#no-titel") || $("#lp-tekst");
+  if (actiefId && document.getElementById(actiefId)) document.getElementById(actiefId).focus();
+  const first = $("#f-titel") || $("#b-titel") || $("#w-naam") || $("#p-naam") || $("#pr-naam") || $("#no-titel") || $("#lp-tekst") || $("#vl-naam") || $("#zoek-q");
   if (first && !s.id && !s.focused){ s.focused = true; setTimeout(() => first.focus(), 50); }
 }
 // leest het formulier terug in de sheet-toestand, zodat een herteken niets kwijtraakt
@@ -1122,6 +1280,11 @@ function captureForm(){
   if (s.type === "person" && $("#p-naam")){ s.data.naam = $("#p-naam").value; s.data.rol = $("#p-helper").checked ? "helper" : ""; }
   if (s.type === "winkel" && $("#w-naam")) s.data.naam = $("#w-naam").value;
   if (s.type === "lijstpunt" && $("#lp-tekst")) s.data.tekst = $("#lp-tekst").value;
+  if (s.type === "zoek" && $("#zoek-q")) s.data.q = $("#zoek-q").value;
+  if (s.type === "last" && $("#vl-naam")) Object.assign(s.data, {
+    naam: $("#vl-naam").value, aanbieder: $("#vl-aanb").value, bedragTekst: $("#vl-bedrag").value, einde: $("#vl-einde").value,
+    opzeg: Number($("#vl-opzeg").value) || 0, nummer: $("#vl-nr").value, notitie: $("#vl-notitie").value,
+  });
   if (s.type === "project" && $("#pr-naam")){
     Object.assign(s.data, {naam: $("#pr-naam").value, omschrijving: $("#pr-omschr").value, datum: $("#pr-datum").value});
     if ($("#pr-af")) s.data.status = $("#pr-af").checked ? "afgerond" : "lopend";
@@ -1295,6 +1458,29 @@ async function lijstToevoegen(id, input){
   input.value = ""; S.drafts["li-" + id] = "";
   await wijzigLijst(id, items => items.concat([{id: maakId(), tekst, klaar: false}]));
 }
+async function saveLast(){
+  captureForm();
+  const s = S.sheet, d = s.data;
+  const naam = (d.naam||"").trim();
+  if (!naam){ $("#vl-naam").focus(); return; }
+  let bedrag = null;
+  const bt = (d.bedragTekst||"").trim();
+  if (bt){ const n = parseFloat(bt.replace(/\./g,"").replace(",", ".").replace(/[^\d.\-]/g,"")); if (isFinite(n)) bedrag = Math.round(n*100)/100; }
+  const body = {
+    naam, aanbieder: (d.aanbieder||"").trim(), soort: d.soort || "Overig", bedrag, periode: d.periode || "maand",
+    einde: d.einde || "", opzeg: Number(d.opzeg) || 0, nummer: (d.nummer||"").trim(), notitie: (d.notitie||"").trim(),
+    gemaaktOp: d.gemaaktOp || new Date().toISOString(),
+  };
+  const id = s.id || maakId();
+  closeSheet();
+  await write(db => db.doc("lasten/" + id).set(body), s.id ? "Bijgewerkt" : "Toegevoegd");
+}
+// een taak bewerken: hetzelfde venster als via de lijst, ook vanuit het zoeken
+function bewerkTaak(t){
+  if (!t || !S.canWrite) return;
+  if (t.soort === "boodschap") openSheet({type:"boodschap", id: t.id, data: Object.assign({}, t)});
+  else openSheet({type:"task", id: t.id, data: Object.assign({}, t, {herhaalKey: herhaalKey(t.herhaal), _projectVoor: t.project || ""})});
+}
 async function savePerson(){
   captureForm();
   const s = S.sheet, d = s.data;
@@ -1369,6 +1555,7 @@ document.addEventListener("click", e => {
         break;
       }
       // de plusknop in Projecten: nieuw project, of binnen een project een taak of idee
+      if (S.view === "lasten"){ openSheet({type:"last", data:{periode: "maand"}}); break; }
       if (S.view === "projecten" && !a.dataset.preset){
         if (!S.project){ openSheet({type:"project", data:{kleur: KLEUREN.find(k => !S.projecten.some(p => p.kleur === k)) || KLEUREN[0]}}); break; }
         if (S.projTab === "ideeen"){ openSheet({type:"notitie", data:{soort:"idee", project: S.project}}); break; }
@@ -1410,6 +1597,46 @@ document.addEventListener("click", e => {
       break;
     }
     case "toon-klaar": S.toonKlaar = !S.toonKlaar; render(); break;
+    case "zoek": openSheet({type:"zoek", data:{q: ""}}); break;
+    case "zoek-ga": {
+      const soort = a.dataset.soort;
+      closeSheet();
+      if (soort === "taak" || soort === "boodschap"){
+        const t = S.tasks.find(x => x.id === id); if (!t) return;
+        if (soort === "boodschap"){ S.view = "kopen"; S.kopenTab = "boodschappen"; lsSet("view","kopen"); lsSet("kopenTab","boodschappen"); render(); }
+        bewerkTaak(t);
+      } else if (soort === "project"){
+        S.view = "projecten"; S.project = id; S.projTab = "taken"; lsSet("view","projecten"); render(); window.scrollTo(0,0);
+      } else if (soort === "notitie"){
+        const n = S.notities.find(x => x.id === id); if (!n) return;
+        S.view = "projecten"; S.project = n.project; S.projTab = "ideeen"; lsSet("view","projecten"); render();
+        // naar de kaart scrollen en hem even laten oplichten
+        const kaart = document.querySelector(`.notitie-h[data-id="${CSS.escape(id)}"]`);
+        if (kaart){ kaart.parentElement.scrollIntoView({block:"center"}); kaart.parentElement.classList.add("gevonden"); setTimeout(() => kaart.parentElement.classList.remove("gevonden"), 1800); }
+      } else if (soort === "last"){
+        const l = S.lasten.find(x => x.id === id); if (!l) return;
+        S.view = "lasten"; render(); window.scrollTo(0,0);
+        if (S.canWrite) openSheet({type:"last", id, data: Object.assign({}, l)});
+      }
+      break;
+    }
+    case "naar-lasten": S.view = "lasten"; render(); window.scrollTo(0,0); break;
+    case "new-last": openSheet({type:"last", data:{soort: id || "", periode: "maand"}}); break;
+    case "edit-last": { const l = S.lasten.find(x => x.id === id); if (l && S.canWrite) openSheet({type:"last", id, data: Object.assign({}, l)}); break; }
+    case "delete-last": {
+      if (!S.sheet.armed){ captureForm(); S.sheet.armed = true; renderSheet(); return; }
+      const lid = S.sheet.id; closeSheet();
+      write(db => db.doc("lasten/" + lid).delete(), "Verwijderd");
+      break;
+    }
+    case "last-taak": {
+      captureForm();
+      const l = S.sheet.data;
+      const od = opzegDatum(l), dag = od && od > vandaag() ? od : vandaag();
+      const extra = [l.aanbieder, l.nummer ? "Nummer: " + l.nummer : "", "Contract loopt tot " + datumMetJaar(l.einde) + (l.opzeg ? `, opzegtermijn ${l.opzeg} ${l.opzeg === 1 ? "maand" : "maanden"}` : "")].filter(Boolean).join("\n");
+      openSheet({type:"task", data:{soort:"regelen", titel: "Opzeggen of verlengen: " + (l.naam || ""), datum: dag, wie: S.ik || "", notitie: extra, belangrijk: true, categorie: "Administratie"}});
+      break;
+    }
     case "open-project": S.project = id; S.projTab = "taken"; S.toonKlaar = false; render(); window.scrollTo(0,0); break;
     case "sluit-project": S.project = null; render(); window.scrollTo(0,0); break;
     case "proj-tab": S.projTab = id; render(); break;
@@ -1489,6 +1716,7 @@ document.addEventListener("submit", e => {
   e.preventDefault();
   if (e.target.id === "loginForm") inloggen();
   if (e.target.id === "projectForm") saveProject();
+  if (e.target.id === "lastForm") saveLast();
   if (e.target.id === "notitieForm") saveNotitie();
   if (e.target.id === "lijstpuntForm"){
     const tekst = $("#lp-tekst").value.trim();
@@ -1565,6 +1793,8 @@ document.addEventListener("change", e => {
 });
 document.addEventListener("input", e => {
   if (e.target.id && (e.target.id.startsWith("qa-") || e.target.id.startsWith("li-"))) S.drafts[e.target.id] = e.target.value;
+  // zoeken: alleen de resultaten verversen, zodat het toetsenbord open blijft
+  if (e.target.id === "zoek-q" && S.sheet){ S.sheet.data.q = e.target.value; $("#zoek-res").innerHTML = zoekHtml(e.target.value); }
   // prijsveld tonen of verbergen hangt af van soort; dat loopt via pick. Hier alleen de prijs bijhouden.
   if (e.target.id === "f-prijs" && S.sheet) S.sheet.data.prijsTekst = e.target.value;
 });
@@ -1623,7 +1853,7 @@ async function importeren(file){
   let data;
   try { data = JSON.parse(await file.text()); } catch(_){ toast("Dit bestand kan ik niet lezen. Kies thuisfront-export.json."); return; }
   const items = [];
-  for (const col of ["people","winkels","tasks","projecten","notities","instellingen"]){
+  for (const col of ["people","winkels","tasks","projecten","notities","lasten","instellingen"]){
     const docs = data[col] || {};
     for (const id of Object.keys(docs)) items.push([col + "/" + id, docs[id]]);
   }
@@ -1696,6 +1926,10 @@ function luisteren(){
       vers.projecten = !snap.fromCache;
       render(); if (S.sheet) { captureForm(); renderSheet(); } migreerProjecten();
     }, onErr),
+    db.collection("lasten").onSnapshot(snap => {
+      S.lasten = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
+      render();
+    }, onErr),
     db.collection("notities").onSnapshot(snap => {
       S.notities = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
       render();
@@ -1710,7 +1944,7 @@ function luisteren(){
 function stoppen(){
   afmelden.forEach(f => { try { f(); } catch(_){} });
   afmelden = [];
-  Object.assign(S, {people: [], tasks: [], winkels: [], projecten: [], notities: [], ready: false, loadErr: ""});
+  Object.assign(S, {people: [], tasks: [], winkels: [], projecten: [], notities: [], lasten: [], ready: false, loadErr: ""});
   Object.assign(vers, {tasks: false, projecten: false, inst: false});
   zetInstellingen({});
 }
