@@ -429,7 +429,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "459061218486",
   appId: "1:459061218486:web:f861fb9c7c97b530f82a17",
 };
-const VERSIE = "23 okt 2026 · 16";
+const VERSIE = "24 okt 2026 · 17";
 
 (function(){
 "use strict";
@@ -1036,8 +1036,9 @@ function notitieKaart(n){
 const LAST_SOORTEN = ["Wonen", "Energie", "Water", "Internet & tv", "Telefoon", "Verzekering", "Abonnement", "Overig"];
 // [code, knop, achter het bedrag, aantal maanden per keer]; "4 weken" = 13 keer per jaar, dus 12/13 maand
 const PERIODES = [["maand", "Maand", "/mnd", 1], ["4weken", "4 weken", "/4 wk", 12/13], ["kwartaal", "Kwartaal", "/kw", 3], ["jaar", "Jaar", "/jr", 12]];
-const LAST_PERIODES = PERIODES.filter(p => p[0] !== "4weken");
-const INK_PERIODES = PERIODES.filter(p => p[0] !== "kwartaal");
+// alle vier overal: ook inkomen kan per kwartaal komen (bijv. kindgebonden budget), en kosten per 4 weken
+const LAST_PERIODES = PERIODES;
+const INK_PERIODES = PERIODES;
 const perMaand = l => typeof l.bedrag === "number" ? l.bedrag / ((PERIODES.find(p => p[0] === l.periode) || PERIODES[0])[3]) : 0;
 const datumMetJaar = s => parse(s).toLocaleDateString("nl-NL", {day: "numeric", month: "short", year: "numeric"});
 // n maanden eerder, met de dag zo nodig ingekort (31 maart min 1 maand = 28/29 februari)
